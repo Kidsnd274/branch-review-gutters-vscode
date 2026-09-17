@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b3040"/>
+      <stop offset="1" stop-color="#151821"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#bg)"/>
+
+  <!-- base branch: trunk on the left; the feature branch forks off into the gutter -->
+  <g fill="none" stroke="#8a93a6" stroke-width="4" stroke-linecap="round">
+    <path d="M22 27 V101"/>
+    <path d="M22 44 C22 56 40 48 40 60"/>
+  </g>
+  <circle cx="22" cy="27" r="5" fill="#151821" stroke="#8a93a6" stroke-width="4"/>
+  <circle cx="22" cy="101" r="5" fill="#151821" stroke="#8a93a6" stroke-width="4"/>
+
+  <!-- gutter markers continue the feature branch, in VS Code dirty-diff colours -->
+  <rect x="36" y="60" width="8" height="18" rx="3" fill="#73c991"/>
+  <path d="M36 81 L47 87 L36 93 Z" fill="#f14c4c"/>
+  <rect x="36" y="96" width="8" height="18" rx="3" fill="#4fa6dd"/>
+
+  <!-- code lines, 12px grid -->
+  <g fill="#4b5263">
+    <rect x="58" y="24" width="48" height="6" rx="3"/>
+    <rect x="58" y="36" width="34" height="6" rx="3"/>
+    <rect x="58" y="48" width="42" height="6" rx="3"/>
+    <rect x="58" y="84" width="28" height="6" rx="3"/>
+  </g>
+  <!-- lines beside a marker pick up its tint -->
+  <rect x="58" y="60" width="46" height="6" rx="3" fill="#73c991" opacity=".6"/>
+  <rect x="58" y="72" width="30" height="6" rx="3" fill="#73c991" opacity=".6"/>
+  <rect x="58" y="96" width="40" height="6" rx="3" fill="#4fa6dd" opacity=".6"/>
+  <rect x="58" y="108" width="26" height="6" rx="3" fill="#4fa6dd" opacity=".6"/>
+</svg>
