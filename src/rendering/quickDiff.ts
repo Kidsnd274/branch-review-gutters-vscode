@@ -27,6 +27,8 @@ export interface RenderHost {
  */
 export class QuickDiffRenderer implements vscode.Disposable {
 	private readonly controls = new Map<string, vscode.SourceControl>();
+	/** Last state the originals were computed from, keyed by repo root. */
+	private readonly signatures = new Map<string, string>();
 
 	constructor(
 		private readonly host: RenderHost,
@@ -51,22 +53,48 @@ export class QuickDiffRenderer implements vscode.Disposable {
 			existing.dispose();
 			this.controls.delete(rootFsPath);
 		}
+		this.signatures.delete(rootFsPath);
+	}
+
+	/**
+	 * Everything that can change which original a file maps to: the commit
+	 * compared against, and the files whose base path is not their own path.
+	 */
+	private signatureFor(repo: RepoInfo): string {
+		const baseline = this.host.getBaseline(repo);
+		const changeSet = this.host.getChangeSet(repo);
+		const remapped: string[] = [];
+		if (changeSet) {
+			for (const change of changeSet.byPath.values()) {
+				if (change.kind === 'added' || change.kind === 'untracked') {
+					remapped.push(`+${change.path}`);
+				} else if (change.kind === 'renamed') {
+					remapped.push(`${change.basePath}>${change.path}`);
+				}
+			}
+			remapped.sort();
+		}
+		return `${baseline?.baseCommit ?? ''}|${remapped.join('\u0000')}`;
 	}
 
 	/**
 	 * Brings registration in line with the repository's current state.
 	 * Re-registering is what makes VS Code re-request originals for already
-	 * open editors after the baseline moves.
+	 * open editors, so it is done exactly when the answers would differ -
+	 * a plain refresh that changed nothing must not flicker the SCM view.
 	 */
-	sync(repo: RepoInfo, options: { recreate?: boolean } = {}): void {
+	sync(repo: RepoInfo): void {
 		const shouldRender = this.host.isEnabled(repo) && isRenderableBaseline(this.host.getBaseline(repo));
 		if (!shouldRender) {
 			this.unregister(repo.rootFsPath);
 			return;
 		}
-		if (options.recreate || !this.controls.has(repo.rootFsPath)) {
-			this.register(repo);
+		const signature = this.signatureFor(repo);
+		if (this.controls.has(repo.rootFsPath) && this.signatures.get(repo.rootFsPath) === signature) {
+			return;
 		}
+		this.register(repo);
+		this.signatures.set(repo.rootFsPath, signature);
 	}
 
 	remove(rootFsPath: string): void {

@@ -42,13 +42,19 @@ test('rejects anything but a full sha', () => {
 	assert.throws(() => encodeBaseQuery({ repo: '', commit: SHA, base: 'a.ts' }), BaseUriError);
 });
 
+const b64 = (value: unknown) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+
 test('rejects malformed queries instead of trusting them', () => {
-	assert.throws(() => decodeBaseQuery('not json'), BaseUriError);
-	assert.throws(() => decodeBaseQuery(encodeURIComponent('[]')), BaseUriError);
-	assert.throws(
-		() => decodeBaseQuery(encodeURIComponent(JSON.stringify({ repo: '/r', commit: SHA, base: '../x' }))),
-		BaseUriError,
-	);
+	assert.throws(() => decodeBaseQuery('not base64url json'), BaseUriError);
+	assert.throws(() => decodeBaseQuery(b64([])), BaseUriError);
+	assert.throws(() => decodeBaseQuery(b64({ repo: '/r', commit: SHA, base: '../x' })), BaseUriError);
+	assert.throws(() => decodeBaseQuery(b64({ repo: '/r', commit: 'HEAD', base: 'a.ts' })), BaseUriError);
+});
+
+test('the encoded query needs no percent-escaping', () => {
+	const query = encodeBaseQuery({ repo: '/tmp/re po', commit: SHA, base: 'sp ace/\u00fc.ts' });
+	assert.match(query, /^[A-Za-z0-9_-]+$/);
+	assert.equal(encodeURIComponent(query), query);
 });
 
 test('uri parts keep the current path for the tab title', () => {

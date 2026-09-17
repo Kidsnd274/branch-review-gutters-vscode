@@ -271,7 +271,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 			this.content.invalidate();
 		}
 
-		this.renderer.sync(runtime.info, { recreate: true });
+		this.renderer.sync(runtime.info);
 		this.decorations.refresh();
 		this.renderStatusBar();
 	}
@@ -284,6 +284,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 		}
 		try {
 			runtime.changeSet = await loadChangeSet(runtime.info, baseCommit);
+			this.renderer.sync(runtime.info);
 			this.decorations.refresh();
 			this.renderStatusBar();
 		} catch (err) {
