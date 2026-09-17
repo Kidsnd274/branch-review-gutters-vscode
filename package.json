@@ -1,0 +1,184 @@
+{
+  "name": "branch-review-gutters",
+  "displayName": "Branch Review Gutters",
+  "description": "Review a branch against its merge base using editor gutter markers, without diff editors.",
+  "publisher": "kidsnd274",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Runs git in the workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "extensionDependencies": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "reviewGutters.toggle",
+        "title": "Toggle Review Gutters",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.enable",
+        "title": "Enable Review Gutters",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.disable",
+        "title": "Disable Review Gutters",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.selectBase",
+        "title": "Select Base Branch or Commit...",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.autoDetectBase",
+        "title": "Auto-detect Base Branch",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.refresh",
+        "title": "Refresh Comparison",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.clearBase",
+        "title": "Clear Base Selection",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.showMenu",
+        "title": "Review Gutters Menu",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.showChangedFiles",
+        "title": "Show Changed Files...",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.nextChangedFile",
+        "title": "Next Changed File",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.previousChangedFile",
+        "title": "Previous Changed File",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.nextChange",
+        "title": "Next Change in File",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.previousChange",
+        "title": "Previous Change in File",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.openBaseVersion",
+        "title": "Open Base Version of Current File",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.compareWithBase",
+        "title": "Compare Current File with Base",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.showLog",
+        "title": "Show Log",
+        "category": "Review Gutters"
+      }
+    ],
+    "configuration": {
+      "title": "Branch Review Gutters",
+      "properties": {
+        "reviewGutters.baseBranches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "main",
+            "master"
+          ],
+          "description": "Candidate base branch names for auto-detection, in order of preference."
+        },
+        "reviewGutters.remote": {
+          "type": "string",
+          "default": "origin",
+          "description": "Remote used for <remote>/<branch> fallbacks and for the remote default branch."
+        },
+        "reviewGutters.explorerBadges": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show badges and colours for changed files in the Explorer."
+        },
+        "reviewGutters.maxFileSizeKB": {
+          "type": "number",
+          "default": 1024,
+          "description": "Skip files whose base version is larger than this, in kilobytes."
+        },
+        "reviewGutters.excludeGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Repository-relative glob patterns that are never decorated."
+        },
+        "reviewGutters.logLevel": {
+          "type": "string",
+          "enum": [
+            "info",
+            "debug"
+          ],
+          "default": "info",
+          "description": "Verbosity of the Branch Review Gutters output channel."
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "reviewGutters.showMenu",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "test": "npm run compile && node --test \"out/test/*.test.js\"",
+    "package": "vsce package --no-dependencies",
+    "install-local": "code --install-extension branch-review-gutters-0.1.0.vsix --force"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.0",
+    "@types/vscode": "1.138.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.9.2"
+  }
+}
