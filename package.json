@@ -3,7 +3,7 @@
   "displayName": "Branch Review Gutters",
   "description": "Review a branch against its merge base using editor gutter markers, without diff editors.",
   "publisher": "kidsnd274",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "icon": "assets/icon/icon.png",
   "private": true,
   "license": "UNLICENSED",
@@ -184,7 +184,7 @@
     "icon": "./scripts/build-icon.sh",
     "package": "vsce package --no-dependencies",
     "build": "./scripts/build-vsix.sh",
-    "install-local": "code --install-extension branch-review-gutters-0.1.0.vsix --force"
+    "install-local": "code --install-extension branch-review-gutters-0.1.1.vsix --force"
   },
   "devDependencies": {
     "@types/node": "^24.5.0",

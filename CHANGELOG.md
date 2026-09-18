@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Hardened repository discovery against edge cases and serialised per-repo
+  refreshes to avoid racing state updates.
+
 ## 0.1.0
 
 First version.

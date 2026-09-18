@@ -85,7 +85,7 @@ npm run install-local
 Or install the packaged file directly:
 
 ```sh
-code --install-extension branch-review-gutters-0.1.0.vsix --force
+code --install-extension branch-review-gutters-0.1.1.vsix --force
 ```
 
 ## Usage
