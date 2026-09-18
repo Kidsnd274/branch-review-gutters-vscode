@@ -57,7 +57,10 @@ export class BaseContentProvider implements vscode.TextDocumentContentProvider, 
 		}
 		try {
 			const entry = await this.load(payload);
-			return !entry.binary && !entry.tooLarge;
+			// `missing` covers files git does not know about in the base and that
+			// the change set does not list either - typically ignored files. An
+			// empty original would paint the whole file as added.
+			return !entry.binary && !entry.tooLarge && !entry.missing;
 		} catch (err) {
 			log.debug(`shouldProvide(${payload.base}) failed: ${err instanceof Error ? err.message : String(err)}`);
 			return false;

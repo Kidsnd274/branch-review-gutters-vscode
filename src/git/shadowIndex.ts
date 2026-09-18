@@ -22,6 +22,9 @@ const MAX_INDEX_BYTES = 64 * 1024 * 1024;
 
 const gitDirCache = new Map<string, string | undefined>();
 
+/** Distinguishes overlapping snapshots of the same repository in one process. */
+let snapshotSerial = 0;
+
 async function indexPathFor(repoRoot: string): Promise<string | undefined> {
 	if (!gitDirCache.has(repoRoot)) {
 		// `--absolute-git-dir` gives the *per-worktree* directory, which is
@@ -59,7 +62,8 @@ export async function createShadowIndex(repoRoot: string): Promise<ShadowIndex |
 			return undefined;
 		}
 		const id = createHash('sha256').update(repoRoot).digest('hex').slice(0, 16);
-		const target = path.join(os.tmpdir(), `branch-review-gutters-${id}-${process.pid}.index`);
+		snapshotSerial += 1;
+		const target = path.join(os.tmpdir(), `branch-review-gutters-${id}-${process.pid}-${snapshotSerial}.index`);
 		await fs.copyFile(source, target);
 		return {
 			path: target,

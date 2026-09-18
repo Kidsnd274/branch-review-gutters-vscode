@@ -1,8 +1,7 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import type { API as GitAPI, GitExtension, Repository as GitRepository } from '../types/git';
 import { gitLine, setGitPath } from './exec';
+import { resolveGitDirs } from './gitDirs';
 import { debounce } from '../util/debounce';
 import { posixRelative } from '../util/paths';
 import * as log from '../util/log';
@@ -30,6 +29,9 @@ export class RepositoryService implements vscode.Disposable {
 
 	private api: GitAPI | undefined;
 	private usingFallback = false;
+	/** Listeners that belong to the current discovery mode (API or fallback). */
+	private modeDisposables: vscode.Disposable[] = [];
+	private enablementListener: vscode.Disposable | undefined;
 
 	get repositories(): readonly RepoInfo[] {
 		return [...this.repos.values()];
@@ -87,32 +89,54 @@ export class RepositoryService implements vscode.Disposable {
 			log.error('could not activate the built-in Git extension', err);
 			return false;
 		}
+		if (!this.enablementListener) {
+			// `git.enabled` can flip either way at runtime; follow it both ways.
+			this.enablementListener = exports.onDidChangeEnablement((enabled) => {
+				void this.onGitEnablementChanged(exports, enabled);
+			});
+			this.disposables.push(this.enablementListener);
+		}
 		if (!exports.enabled) {
 			log.info('built-in Git extension is disabled (git.enabled=false); using fallback discovery');
-			// If the user enables git later, switch over.
-			this.disposables.push(
-				exports.onDidChangeEnablement(async (enabled) => {
-					if (enabled && this.usingFallback) {
-						log.info('git enablement changed; re-attaching to the Git extension');
-						this.teardownRepos();
-						this.usingFallback = false;
-						await this.tryAttachGitExtension();
-						this.onDidChangeRepositoriesEmitter.fire();
-					}
-				}),
-			);
 			return false;
 		}
+		this.attachApi(exports.getAPI(1));
+		return true;
+	}
 
-		const api = exports.getAPI(1);
+	private async onGitEnablementChanged(exports: GitExtension, enabled: boolean): Promise<void> {
+		if (enabled && this.usingFallback) {
+			log.info('git enablement changed; re-attaching to the Git extension');
+			this.leaveCurrentMode();
+			this.attachApi(exports.getAPI(1));
+			this.onDidChangeRepositoriesEmitter.fire();
+		} else if (!enabled && this.api) {
+			log.info('built-in Git extension was disabled; switching to fallback discovery');
+			this.leaveCurrentMode();
+			await this.startFallback();
+			this.onDidChangeRepositoriesEmitter.fire();
+		}
+	}
+
+	/** Drops every repository and mode-specific listener before switching modes. */
+	private leaveCurrentMode(): void {
+		this.teardownRepos();
+		this.modeDisposables.forEach((d) => d.dispose());
+		this.modeDisposables = [];
+		this.api = undefined;
+		this.usingFallback = false;
+	}
+
+	private attachApi(api: GitAPI): void {
 		this.api = api;
+		this.usingFallback = false;
 		setGitPath(api.git?.path);
 		log.info(`attached to the built-in Git extension (${api.repositories.length} repositories)`);
 
 		for (const repo of api.repositories) {
 			this.addApiRepository(repo);
 		}
-		this.disposables.push(
+		this.modeDisposables.push(
 			api.onDidOpenRepository((repo) => {
 				this.addApiRepository(repo);
 				this.onDidChangeRepositoriesEmitter.fire();
@@ -122,7 +146,6 @@ export class RepositoryService implements vscode.Disposable {
 				this.onDidChangeRepositoriesEmitter.fire();
 			}),
 		);
-		return true;
 	}
 
 	private addApiRepository(repo: GitRepository): void {
@@ -154,8 +177,11 @@ export class RepositoryService implements vscode.Disposable {
 		this.usingFallback = true;
 		setGitPath(vscode.workspace.getConfiguration('git').get<string>('path') ?? undefined);
 		await this.discoverWorkspaceRepos();
-		this.disposables.push(
+		this.modeDisposables.push(
 			vscode.workspace.onDidChangeWorkspaceFolders(async () => {
+				if (!this.usingFallback) {
+					return;
+				}
 				await this.discoverWorkspaceRepos();
 				this.onDidChangeRepositoriesEmitter.fire();
 			}),
@@ -193,10 +219,11 @@ export class RepositoryService implements vscode.Disposable {
 
 	/**
 	 * Watches `HEAD` and `refs/**` in the git directory. For worktrees and
-	 * submodules `.git` is a file containing `gitdir: <path>`.
+	 * submodules `.git` is a file containing `gitdir: <path>`; a linked
+	 * worktree keeps `HEAD` in its own directory and refs in the common one.
 	 */
 	private watchFallbackRepo(info: RepoInfo): void {
-		const gitDir = resolveGitDir(info.rootFsPath);
+		const dirs = resolveGitDirs(info.rootFsPath);
 		const subs: vscode.Disposable[] = [];
 		const notify = debounce(async () => {
 			const current = this.repos.get(info.rootFsPath);
@@ -210,15 +237,22 @@ export class RepositoryService implements vscode.Disposable {
 			this.onDidChangeRepositoryStateEmitter.fire(current);
 		}, 300);
 
-		if (gitDir) {
-			const pattern = new vscode.RelativePattern(vscode.Uri.file(gitDir), '{HEAD,refs/**,packed-refs}');
-			const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-			subs.push(
-				watcher,
-				watcher.onDidChange(() => notify()),
-				watcher.onDidCreate(() => notify()),
-				watcher.onDidDelete(() => notify()),
-			);
+		if (dirs) {
+			const watch = (dir: string, glob: string) => {
+				const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), glob));
+				subs.push(
+					watcher,
+					watcher.onDidChange(() => notify()),
+					watcher.onDidCreate(() => notify()),
+					watcher.onDidDelete(() => notify()),
+				);
+			};
+			if (dirs.gitDir === dirs.commonDir) {
+				watch(dirs.gitDir, '{HEAD,refs/**,packed-refs}');
+			} else {
+				watch(dirs.gitDir, 'HEAD');
+				watch(dirs.commonDir, '{refs/**,packed-refs}');
+			}
 		} else {
 			log.warn(`could not resolve a git directory for ${info.rootFsPath}; relying on focus events`);
 		}
@@ -258,43 +292,8 @@ export class RepositoryService implements vscode.Disposable {
 	}
 
 	dispose(): void {
-		this.teardownRepos();
+		this.leaveCurrentMode();
 		this.disposables.forEach((d) => d.dispose());
 		this.disposables.length = 0;
-	}
-}
-
-/**
- * Resolves the directory that holds `HEAD` and `refs/`. Handles the worktree
- * and submodule case where `<root>/.git` is a file containing `gitdir: ...`.
- * Returns the *common* directory when one is recorded, since that is where
- * branch refs live for a linked worktree.
- */
-export function resolveGitDir(rootFsPath: string): string | undefined {
-	const dotGit = path.join(rootFsPath, '.git');
-	let stat: fs.Stats;
-	try {
-		stat = fs.statSync(dotGit);
-	} catch {
-		return undefined;
-	}
-	if (stat.isDirectory()) {
-		return dotGit;
-	}
-	try {
-		const contents = fs.readFileSync(dotGit, 'utf8');
-		const m = /^gitdir:\s*(.+)\s*$/m.exec(contents);
-		if (!m) {
-			return undefined;
-		}
-		const target = path.isAbsolute(m[1]) ? m[1] : path.resolve(rootFsPath, m[1]);
-		const commonDirFile = path.join(target, 'commondir');
-		if (fs.existsSync(commonDirFile)) {
-			const common = fs.readFileSync(commonDirFile, 'utf8').trim();
-			return path.isAbsolute(common) ? common : path.resolve(target, common);
-		}
-		return target;
-	} catch {
-		return undefined;
 	}
 }

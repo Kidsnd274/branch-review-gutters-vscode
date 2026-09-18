@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 
 export type LogLevel = 'info' | 'debug';
 
@@ -6,7 +6,10 @@ let channel: vscode.OutputChannel | undefined;
 let level: LogLevel = 'info';
 
 export function initLog(ctx: vscode.ExtensionContext): void {
-	channel = vscode.window.createOutputChannel('Branch Review Gutters');
+	// Required lazily so modules that only log (git/*, changes/*) can be unit
+	// tested under plain node, where the `vscode` module does not exist.
+	const api = require('vscode') as typeof vscode;
+	channel = api.window.createOutputChannel('Branch Review Gutters');
 	ctx.subscriptions.push(channel);
 }
 

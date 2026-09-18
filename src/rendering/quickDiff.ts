@@ -15,6 +15,8 @@ export interface RenderHost {
 	getBaseline(repo: RepoInfo): Baseline | undefined;
 	getChangeSet(repo: RepoInfo): ChangeSet | undefined;
 	isExcluded(relPath: string): boolean;
+	/** Opaque key of every setting that changes which originals are offered. */
+	originalsConfigKey(): string;
 }
 
 /**
@@ -58,7 +60,8 @@ export class QuickDiffRenderer implements vscode.Disposable {
 
 	/**
 	 * Everything that can change which original a file maps to: the commit
-	 * compared against, and the files whose base path is not their own path.
+	 * compared against, the files whose base path is not their own path, and
+	 * the settings (exclusions, size cap) consulted per file.
 	 */
 	private signatureFor(repo: RepoInfo): string {
 		const baseline = this.host.getBaseline(repo);
@@ -74,7 +77,7 @@ export class QuickDiffRenderer implements vscode.Disposable {
 			}
 			remapped.sort();
 		}
-		return `${baseline?.baseCommit ?? ''}|${remapped.join('\u0000')}`;
+		return `${baseline?.baseCommit ?? ''}|${this.host.originalsConfigKey()}|${remapped.join('\u0000')}`;
 	}
 
 	/**

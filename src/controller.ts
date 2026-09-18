@@ -62,9 +62,15 @@ export class Controller implements RenderHost, vscode.Disposable {
 			this.adopt(repo);
 		}
 
+		// Saves only reload the repository that was saved into, so one save in a
+		// multi-root workspace does not fan out git across every repository.
+		const pendingSaves = new Set<string>();
 		const saveDebounced = debounce(() => {
-			for (const runtime of this.runtimes.values()) {
-				if (runtime.state.enabled && runtime.touched) {
+			const roots = [...pendingSaves];
+			pendingSaves.clear();
+			for (const root of roots) {
+				const runtime = this.runtimes.get(root);
+				if (runtime?.state.enabled && runtime.touched) {
 					void this.refreshChangeSetOnly(runtime);
 				}
 			}
@@ -90,6 +96,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 				}
 				const repo = this.repositories.getRepositoryFor(doc.uri);
 				if (repo && this.isEnabled(repo)) {
+					pendingSaves.add(repo.rootFsPath);
 					saveDebounced();
 				}
 			}),
@@ -140,6 +147,10 @@ export class Controller implements RenderHost, vscode.Disposable {
 
 	isExcluded(relPath: string): boolean {
 		return this.isExcludedPath(relPath);
+	}
+
+	originalsConfigKey(): string {
+		return JSON.stringify([this.config.excludeGlobs, this.config.maxFileSizeKB]);
 	}
 
 	// --------------------------------------------------------------- lifecycle
@@ -232,14 +243,27 @@ export class Controller implements RenderHost, vscode.Disposable {
 	async refresh(repo: RepoInfo, reason: string): Promise<void> {
 		const runtime = this.adopt(repo);
 		runtime.touched = true;
+		return this.serialised(runtime, () => this.doRefresh(runtime, reason));
+	}
+
+	/**
+	 * Runs `work` unless a refresh for this repository is already in flight,
+	 * in which case a full refresh is queued behind it instead. Every git run
+	 * for a repository goes through here, so two operations never share the
+	 * repository's shadow index or race to assign its change set.
+	 */
+	private serialised(runtime: RepoRuntime, work: () => Promise<void>): Promise<void> {
 		if (runtime.inFlight) {
 			runtime.queued = true;
 			return runtime.inFlight;
 		}
 		const run = async (): Promise<void> => {
+			let step = work;
 			do {
 				runtime.queued = false;
-				await this.doRefresh(runtime, reason);
+				await step();
+				// Anything queued while we ran may have needed a full refresh.
+				step = () => this.doRefresh(runtime, 'queued behind another refresh');
 			} while (runtime.queued);
 		};
 		runtime.inFlight = run().finally(() => {
@@ -265,6 +289,11 @@ export class Controller implements RenderHost, vscode.Disposable {
 				runtime.changeSet = await loadChangeSet(runtime.info, baseline.baseCommit);
 			} catch (err) {
 				log.error(`could not load the change set for ${runtime.info.rootFsPath}`, err);
+				if (previousBase !== baseline.baseCommit) {
+					// The old change set describes a different comparison; showing
+					// nothing is better than badges and renames from the wrong base.
+					runtime.changeSet = undefined;
+				}
 			}
 		} else {
 			runtime.changeSet = undefined;
@@ -277,19 +306,21 @@ export class Controller implements RenderHost, vscode.Disposable {
 	}
 
 	/** Cheap path for saves: the baseline cannot have moved. */
-	private async refreshChangeSetOnly(runtime: RepoRuntime): Promise<void> {
-		const baseCommit = runtime.baseline?.baseCommit;
-		if (!baseCommit || !isRenderableBaseline(runtime.baseline)) {
-			return;
-		}
-		try {
-			runtime.changeSet = await loadChangeSet(runtime.info, baseCommit);
-			this.renderer.sync(runtime.info);
-			this.decorations.refresh();
-			this.renderStatusBar();
-		} catch (err) {
-			log.error(`could not reload the change set for ${runtime.info.rootFsPath}`, err);
-		}
+	private refreshChangeSetOnly(runtime: RepoRuntime): Promise<void> {
+		return this.serialised(runtime, async () => {
+			const baseCommit = runtime.baseline?.baseCommit;
+			if (!baseCommit || !isRenderableBaseline(runtime.baseline)) {
+				return;
+			}
+			try {
+				runtime.changeSet = await loadChangeSet(runtime.info, baseCommit);
+				this.renderer.sync(runtime.info);
+				this.decorations.refresh();
+				this.renderStatusBar();
+			} catch (err) {
+				log.error(`could not reload the change set for ${runtime.info.rootFsPath}`, err);
+			}
+		});
 	}
 
 	private async ensureGitVersion(repo: RepoInfo): Promise<void> {
