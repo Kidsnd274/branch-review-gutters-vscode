@@ -6,7 +6,6 @@ import { isAncestor, listRefs, resolveCommit, type RefEntry } from '../git/refs'
 import { isValidRef } from '../git/args';
 import { makeBaseUri } from '../content/baseContentProvider';
 import { describeCounts, totalChanges, type FileChange } from '../changes/parse';
-import { basenamePosix, dirnamePosix } from '../util/paths';
 import * as log from '../util/log';
 
 interface RefItem extends vscode.QuickPickItem {
@@ -185,52 +184,10 @@ export async function showMenu(controller: Controller, repo: RepoInfo): Promise<
 
 // -------------------------------------------------------------- changed files
 
-const ICONS: Record<FileChange['kind'], string> = {
-	added: 'diff-added',
-	untracked: 'diff-added',
-	modified: 'diff-modified',
-	typeChanged: 'diff-modified',
-	renamed: 'diff-renamed',
-	deleted: 'diff-removed',
-};
-
-interface FileItem extends vscode.QuickPickItem {
-	change: FileChange;
-}
-
-export function buildChangedFileItems(changes: readonly FileChange[]): FileItem[] {
-	return changes.map((change) => ({
-		label: `$(${ICONS[change.kind]}) ${basenamePosix(change.path)}`,
-		description: dirnamePosix(change.path),
-		detail: change.kind === 'renamed' && change.basePath ? `from ${change.basePath}` : undefined,
-		change,
-	}));
-}
-
-export async function showChangedFiles(controller: Controller, repo: RepoInfo): Promise<void> {
-	const changeSet = controller.getChangeSet(repo);
-	if (!changeSet) {
-		void vscode.window.showInformationMessage(
-			'Branch Review Gutters: no comparison is loaded for this repository yet.',
-		);
-		return;
-	}
-	const changes = changeSet.all();
-	if (changes.length === 0) {
-		void vscode.window.showInformationMessage('Branch Review Gutters: no files changed against the base.');
-		return;
-	}
-	const picked = await vscode.window.showQuickPick(buildChangedFileItems(changes), {
-		title: `Changed vs ${controller.getBaseline(repo)?.baseRef ?? 'base'} (${changes.length})`,
-		matchOnDescription: true,
-		placeHolder: 'Open a changed file',
-	});
-	if (!picked) {
-		return;
-	}
-	await openChange(controller, repo, picked.change);
-}
-
+/**
+ * Opens a change from the picker or the tree. A deleted file has nothing on
+ * disk, so it opens its base version instead of a missing path.
+ */
 export async function openChange(controller: Controller, repo: RepoInfo, change: FileChange): Promise<void> {
 	if (change.kind === 'deleted') {
 		const baseCommit = controller.getBaseline(repo)?.baseCommit;

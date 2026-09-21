@@ -1,23 +1,8 @@
 import * as vscode from 'vscode';
-import type { ChangeKind } from '../changes/parse';
 import type { RenderHost } from '../rendering/quickDiff';
 import { isRenderableBaseline } from '../baseline/selection';
+import { styleFor } from '../changes/style';
 import { isDotGitPath } from '../util/paths';
-
-interface Style {
-	badge: string;
-	color: string;
-	label: string;
-}
-
-const STYLES: Record<ChangeKind, Style> = {
-	added: { badge: 'A', color: 'gitDecoration.addedResourceForeground', label: 'Added' },
-	untracked: { badge: 'U', color: 'gitDecoration.untrackedResourceForeground', label: 'Untracked' },
-	modified: { badge: 'M', color: 'gitDecoration.modifiedResourceForeground', label: 'Modified' },
-	typeChanged: { badge: 'M', color: 'gitDecoration.modifiedResourceForeground', label: 'Type changed' },
-	renamed: { badge: 'R', color: 'gitDecoration.renamedResourceForeground', label: 'Renamed' },
-	deleted: { badge: 'D', color: 'gitDecoration.deletedResourceForeground', label: 'Deleted' },
-};
 
 export class ReviewFileDecorationProvider implements vscode.FileDecorationProvider, vscode.Disposable {
 	private readonly onDidChangeEmitter = new vscode.EventEmitter<undefined>();
@@ -60,7 +45,7 @@ export class ReviewFileDecorationProvider implements vscode.FileDecorationProvid
 		if (!change) {
 			return undefined;
 		}
-		const style = STYLES[change.kind];
+		const style = styleFor(change.kind);
 		const against = baseline?.baseRef ?? 'base';
 		const shortSha = baseline?.baseCommit?.slice(0, 7) ?? '';
 		const suffix = change.kind === 'renamed' && change.basePath ? ` from ${change.basePath}` : '';

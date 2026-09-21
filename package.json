@@ -3,7 +3,7 @@
   "displayName": "Branch Review Gutters",
   "description": "Review a branch against its merge base using editor gutter markers, without diff editors.",
   "publisher": "kidsnd274",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "icon": "assets/icon/icon.png",
   "private": true,
   "license": "UNLICENSED",
@@ -66,7 +66,8 @@
       {
         "command": "reviewGutters.refresh",
         "title": "Refresh Comparison",
-        "category": "Review Gutters"
+        "category": "Review Gutters",
+        "icon": "$(refresh)"
       },
       {
         "command": "reviewGutters.clearBase",
@@ -82,6 +83,18 @@
         "command": "reviewGutters.showChangedFiles",
         "title": "Show Changed Files...",
         "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.setTreeMode",
+        "title": "Show as Tree",
+        "category": "Review Gutters",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "reviewGutters.setListMode",
+        "title": "Show as List",
+        "category": "Review Gutters",
+        "icon": "$(list-flat)"
       },
       {
         "command": "reviewGutters.nextChangedFile",
@@ -117,6 +130,26 @@
         "command": "reviewGutters.showLog",
         "title": "Show Log",
         "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.openFromTree",
+        "title": "Open Changed File",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.openBaseFromTree",
+        "title": "Open Base Version",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.compareFromTree",
+        "title": "Compare with Base",
+        "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.copyTreePath",
+        "title": "Copy Path",
+        "category": "Review Gutters"
       }
     ],
     "configuration": {
@@ -143,6 +176,20 @@
           "default": true,
           "description": "Show badges and colours for changed files in the Explorer."
         },
+        "reviewGutters.viewMode": {
+          "type": "string",
+          "enum": [
+            "tree",
+            "list"
+          ],
+          "default": "tree",
+          "description": "How the Changed Files view groups changed files. The view's title-bar toggle overrides this for the current workspace."
+        },
+        "reviewGutters.autoReveal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reveal the current file in the Changed Files view when switching editors."
+        },
         "reviewGutters.maxFileSizeKB": {
           "type": "number",
           "default": 1024,
@@ -167,11 +214,101 @@
         }
       }
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "reviewGutters",
+          "title": "Branch Review",
+          "icon": "assets/icon/activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "reviewGutters": [
+        {
+          "id": "reviewGutters.changedFiles",
+          "name": "Changed Files",
+          "hideWhenEmpty": false
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "reviewGutters.changedFiles",
+        "when": "!reviewGutters.hasRepository",
+        "contents": "This window has no git repository.\n[Check Again](command:reviewGutters.refresh)"
+      },
+      {
+        "view": "reviewGutters.changedFiles",
+        "when": "reviewGutters.hasRepository && !reviewGutters.enabled",
+        "contents": "Review is switched off for this repository.\n[Enable Review Gutters](command:reviewGutters.enable)\n[Select Base Branch or Commit...](command:reviewGutters.selectBase)"
+      },
+      {
+        "view": "reviewGutters.changedFiles",
+        "when": "reviewGutters.hasRepository && reviewGutters.enabled && !reviewGutters.hasBase",
+        "contents": "No base branch could be resolved for this repository.\n[Select Base Branch or Commit...](command:reviewGutters.selectBase)\n[Auto-detect Base Branch](command:reviewGutters.autoDetectBase)"
+      },
+      {
+        "view": "reviewGutters.changedFiles",
+        "when": "reviewGutters.hasRepository && reviewGutters.enabled && reviewGutters.hasBase && !reviewGutters.hasChanges",
+        "contents": "Nothing changed against the base.\n[Refresh Comparison](command:reviewGutters.refresh)"
+      }
+    ],
     "menus": {
       "commandPalette": [
         {
           "command": "reviewGutters.showMenu",
           "when": "false"
+        },
+        {
+          "command": "reviewGutters.openFromTree",
+          "when": "false"
+        },
+        {
+          "command": "reviewGutters.openBaseFromTree",
+          "when": "false"
+        },
+        {
+          "command": "reviewGutters.compareFromTree",
+          "when": "false"
+        },
+        {
+          "command": "reviewGutters.copyTreePath",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "reviewGutters.setListMode",
+          "when": "view == reviewGutters.changedFiles && reviewGutters.viewMode == tree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "reviewGutters.setTreeMode",
+          "when": "view == reviewGutters.changedFiles && reviewGutters.viewMode == list",
+          "group": "navigation@1"
+        },
+        {
+          "command": "reviewGutters.refresh",
+          "when": "view == reviewGutters.changedFiles",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "reviewGutters.openBaseFromTree",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)$/",
+          "group": "reviewGutters@1"
+        },
+        {
+          "command": "reviewGutters.compareFromTree",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)$/",
+          "group": "reviewGutters@2"
+        },
+        {
+          "command": "reviewGutters.copyTreePath",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(added|untracked|modified|typeChanged|renamed)$/",
+          "group": "reviewGutters@3"
         }
       ]
     }
@@ -184,7 +321,7 @@
     "icon": "./scripts/build-icon.sh",
     "package": "vsce package --no-dependencies",
     "build": "./scripts/build-vsix.sh",
-    "install-local": "code --install-extension branch-review-gutters-0.1.1.vsix --force"
+    "install-local": "code --install-extension branch-review-gutters-0.1.2.vsix --force"
   },
   "devDependencies": {
     "@types/node": "^24.5.0",

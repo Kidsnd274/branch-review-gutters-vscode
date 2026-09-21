@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2
+
+- Added a **Branch Review** activity bar view listing every file that differs
+  from the base as a collapsible folder tree, with a flat-list alternative
+  behind a title-bar toggle.
+- Deleted files can be opened at their base version, and compared with the
+  base, straight from the tree.
+- Repositories that are not on screen show "not loaded yet" and spawn no git,
+  so multi-root startup cost is unchanged.
+- `Show Changed Files…` now focuses the new view instead of opening a quick
+  pick. The command id is unchanged, so existing keybindings keep working.
+
 ## 0.1.1
 
 - Hardened repository discovery against edge cases and serialised per-repo

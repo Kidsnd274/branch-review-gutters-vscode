@@ -584,8 +584,46 @@ Creates `$TMPDIR/review-gutters-fixture` with:
 | M2 Rendering | `content/`, `rendering/` (A or B), next/previous change, open base version | QA items 1–3, 7–9 pass |
 | M3 Files | `changeSet.ts`, Explorer badges, changed-files picker, next/previous changed file, rename handling | QA items 4–5 pass |
 | M4 Hardening | edge cases in Section 8, constraints checklist Section 9, README, CHANGELOG, VSIX build, full QA | all QA items pass; checklist all ticked |
+| M5 Changed Files view | `changes/style.ts`, `tree/changeTree.ts`, `tree/changedFilesView.ts`, the Branch Review activity-bar container, the tree/list toggle, auto-reveal, `showChangedFiles` repointed at the view | README QA items 13–20 pass; still no new git subcommands |
 
 Commit at each milestone boundary with a descriptive message. Do not push.
+
+### M5 — Changed Files view (0.1.2)
+
+Decisions taken when the tree was added. They supersede the changed-files
+quick pick described in 6.10.
+
+- **Tree, with a list toggle.** The view defaults to a folder tree of changed
+  files only; a title-bar toggle flips the same view to a flat list. A single
+  command cannot swap its own icon, so the toggle is two commands
+  (`setTreeMode` / `setListMode`), each shown only in the other's state.
+- **No path compaction.** A directory with a single child stays its own node.
+  It matches the Explorer and keeps `TreeItem.id` a pure function of the path.
+- **Folder colour is the most serious kind underneath it**, at the fixed
+  priority `deleted > renamed > modified/typeChanged > added > untracked`,
+  mirroring `propagate: true` on the Explorer badges.
+- **A stable `TreeItem.id` is mandatory.** The id is
+  `repoRoot + mode + nodeType + nodePath`. Without it VS Code cannot match a
+  refreshed node to its previous one and every repaint collapses the whole
+  tree — the main trap in this feature. `TreeItem` instances are cached by id
+  for the same reason, and the built tree is keyed off the change-set object
+  reference, so a repaint that changed nothing rebuilds nothing.
+- **The view never asks for git work.** It renders only the change set the
+  controller already loaded. A repository that has not been `touched` reads
+  "not loaded yet" and spawns nothing, keeping the deliberate "no git fan-out
+  on startup" design for multi-root workspaces intact.
+- **Reveal only on editor change.** `reveal()` runs when the active editor
+  moves, never on refresh, so it cannot fight the user's collapse state.
+  `TreeView.reveal` also requires the provider to implement `getParent`,
+  served from the parent index built alongside the tree.
+- **One hook for refreshes.** The controller fires `onDidChangeChangeSets`
+  at every point that used to call `decorations.refresh()`; the view's repaint
+  is debounced 120 ms so a multi-repo refresh paints once, not N times.
+- **Mode persistence is workspace-scoped.** `reviewGutters.viewMode` is the
+  default; the toggle stores an override in workspace state, which wins over
+  the setting. No `ConfigurationTarget` writes, per the Section 9 checklist.
+- **`showChangedFiles` keeps its command id** and now focuses the view, so
+  existing user keybindings survive.
 
 ---
 

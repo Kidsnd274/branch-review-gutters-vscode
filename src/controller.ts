@@ -8,10 +8,12 @@ import { BaseContentProvider } from './content/baseContentProvider';
 import { QuickDiffRenderer, type RenderHost } from './rendering/quickDiff';
 import { isRenderableBaseline } from './baseline/selection';
 import { ReviewFileDecorationProvider } from './explorer/fileDecorations';
+import { ChangedFilesView, VIEW_ID, type TreeHost } from './tree/changedFilesView';
+import { type TreeMode, visibleChanges } from './tree/changeTree';
 import { StatusBar } from './ui/statusBar';
 import { readConfig, CONFIG_SECTION, type Config } from './config';
-import { makeGlobMatcher } from './util/paths';
-import { debounce } from './util/debounce';
+import { isDotGitPath, makeGlobMatcher } from './util/paths';
+import { debounce, type Debounced } from './util/debounce';
 import { probeVersion, endOfOptionsSupported } from './git/exec';
 import * as log from './util/log';
 
@@ -28,17 +30,24 @@ interface RepoRuntime {
 
 const FOCUS_REFRESH_MS = 5000;
 
-export class Controller implements RenderHost, vscode.Disposable {
+export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 	private readonly runtimes = new Map<string, RepoRuntime>();
 	private readonly disposables: vscode.Disposable[] = [];
 	private config: Config;
 	private isExcludedPath: (relPath: string) => boolean;
 	private lastFocusRefresh = 0;
 	private oldGitWarned = false;
+	private viewModeValue: TreeMode;
+	private readonly treeRefresh: Debounced;
+	private readonly changeSetsChangedEmitter = new vscode.EventEmitter<void>();
+
+	/** Fired whenever a repository's change set may have moved. */
+	readonly onDidChangeChangeSets = this.changeSetsChangedEmitter.event;
 
 	readonly content: BaseContentProvider;
 	private readonly renderer: QuickDiffRenderer;
 	private readonly decorations: ReviewFileDecorationProvider;
+	private readonly view: ChangedFilesView;
 	private readonly statusBar: StatusBar;
 
 	constructor(
@@ -48,13 +57,25 @@ export class Controller implements RenderHost, vscode.Disposable {
 		this.config = readConfig();
 		this.isExcludedPath = makeGlobMatcher(this.config.excludeGlobs);
 		log.setLogLevel(this.config.logLevel);
+		this.viewModeValue = this.store.getViewMode() ?? this.config.viewMode;
 
 		this.content = new BaseContentProvider(() => this.config);
 		this.renderer = new QuickDiffRenderer(this, this.content);
 		this.decorations = new ReviewFileDecorationProvider(this);
 		this.decorations.setEnabled(this.config.explorerBadges);
+		this.view = new ChangedFilesView(this);
+		// One repaint per multi-repo refresh, not one per repository.
+		this.treeRefresh = debounce(() => this.view.refresh(), 120);
 		this.statusBar = new StatusBar();
-		this.disposables.push(this.content, this.renderer, this.decorations, this.statusBar);
+		this.disposables.push(
+			this.content,
+			this.renderer,
+			this.decorations,
+			this.view,
+			this.statusBar,
+			this.changeSetsChangedEmitter,
+			{ dispose: () => this.treeRefresh.cancel() },
+		);
 	}
 
 	async initialize(): Promise<void> {
@@ -88,6 +109,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 			}),
 			vscode.window.onDidChangeActiveTextEditor(() => {
 				this.onActiveEditorChanged();
+				void this.revealActiveFile();
 			}),
 			vscode.window.onDidChangeVisibleTextEditors(() => this.touchVisibleRepositories()),
 			vscode.workspace.onDidSaveTextDocument((doc) => {
@@ -117,6 +139,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 				void this.refreshAllEnabled('window focused');
 			}),
 			{ dispose: () => saveDebounced.cancel() },
+			this.onDidChangeChangeSets(() => this.treeRefresh()),
 		);
 
 		this.touchVisibleRepositories();
@@ -127,6 +150,15 @@ export class Controller implements RenderHost, vscode.Disposable {
 
 	getRepositoryFor(uri: vscode.Uri): RepoInfo | undefined {
 		return this.repositories.getRepositoryFor(uri);
+	}
+
+	/** The repository with exactly this root, as used by the tree's commands. */
+	repositoryAt(rootFsPath: string): RepoInfo | undefined {
+		return this.repositories.repositories.find((r) => r.rootFsPath === rootFsPath);
+	}
+
+	knownRepositories(): readonly RepoInfo[] {
+		return this.repositories.repositories;
 	}
 
 	relativePath(repo: RepoInfo, uri: vscode.Uri): string | undefined {
@@ -151,6 +183,24 @@ export class Controller implements RenderHost, vscode.Disposable {
 
 	originalsConfigKey(): string {
 		return JSON.stringify([this.config.excludeGlobs, this.config.maxFileSizeKB]);
+	}
+
+	isTouched(repo: RepoInfo): boolean {
+		return this.runtimes.get(repo.rootFsPath)?.touched === true;
+	}
+
+	viewMode(): TreeMode {
+		return this.viewModeValue;
+	}
+
+	excludeSignature(): string {
+		return JSON.stringify(this.config.excludeGlobs);
+	}
+
+	/** Repaints everything that reads a change set, and tells listeners. */
+	private notifyChangeSetsChanged(): void {
+		this.decorations.refresh();
+		this.changeSetsChangedEmitter.fire();
 	}
 
 	// --------------------------------------------------------------- lifecycle
@@ -183,7 +233,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 			this.adopt(repo);
 		}
 		this.touchVisibleRepositories();
-		this.decorations.refresh();
+		this.notifyChangeSetsChanged();
 		this.renderStatusBar();
 	}
 
@@ -218,6 +268,69 @@ export class Controller implements RenderHost, vscode.Disposable {
 			'reviewGutters.enabled',
 			repo ? this.isEnabled(repo) : false,
 		);
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.hasRepository', Boolean(repo));
+		void vscode.commands.executeCommand(
+			'setContext',
+			'reviewGutters.hasBase',
+			Boolean(repo && this.getBaseline(repo)?.baseCommit),
+		);
+		// Visible changes, not raw counts: a change set whose every file is
+		// excluded would otherwise leave the view empty with no welcome state.
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.hasChanges', this.hasVisibleChanges(repo));
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.viewMode', this.viewModeValue);
+	}
+
+	private hasVisibleChanges(repo: RepoInfo | undefined): boolean {
+		if (!repo) {
+			return false;
+		}
+		const changeSet = this.getChangeSet(repo);
+		if (!changeSet) {
+			return false;
+		}
+		return visibleChanges(changeSet.all(), (rel) => this.isExcluded(rel)).length > 0;
+	}
+
+	/**
+	 * Follows the active editor into the tree. Driven only by editor changes and
+	 * never by a refresh, so it cannot fight the user's collapse state.
+	 */
+	private async revealActiveFile(): Promise<void> {
+		if (!this.config.autoReveal) {
+			return;
+		}
+		const uri = vscode.window.activeTextEditor?.document.uri;
+		if (!uri || uri.scheme !== 'file') {
+			return;
+		}
+		const repo = this.repositories.getRepositoryFor(uri);
+		if (!repo || !this.isEnabled(repo)) {
+			return;
+		}
+		const rel = this.repositories.relativePath(repo, uri);
+		if (!rel || isDotGitPath(rel) || this.isExcluded(rel)) {
+			return;
+		}
+		if (!this.getChangeSet(repo)?.byPath.has(rel)) {
+			return;
+		}
+		await this.view.revealFile(repo, rel);
+	}
+
+	async setViewMode(mode: TreeMode): Promise<void> {
+		if (this.viewModeValue === mode) {
+			return;
+		}
+		this.viewModeValue = mode;
+		await this.store.setViewMode(mode);
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.viewMode', mode);
+		this.view.refresh();
+	}
+
+	/** Focuses the Changed Files view and reveals the file being edited. */
+	async focusChangedFiles(): Promise<void> {
+		await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
+		await this.revealActiveFile();
 	}
 
 	private async onConfigChanged(): Promise<void> {
@@ -225,8 +338,13 @@ export class Controller implements RenderHost, vscode.Disposable {
 		this.isExcludedPath = makeGlobMatcher(this.config.excludeGlobs);
 		log.setLogLevel(this.config.logLevel);
 		this.decorations.setEnabled(this.config.explorerBadges);
+		// The title-bar toggle wins over the setting until it is changed here.
+		if (!this.store.getViewMode()) {
+			this.viewModeValue = this.config.viewMode;
+		}
 		this.content.invalidate();
 		await this.refreshAllEnabled('configuration changed');
+		this.onActiveEditorChanged();
 	}
 
 	// ----------------------------------------------------------------- refresh
@@ -301,7 +419,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 		}
 
 		this.renderer.sync(runtime.info);
-		this.decorations.refresh();
+		this.notifyChangeSetsChanged();
 		this.renderStatusBar();
 	}
 
@@ -315,7 +433,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 			try {
 				runtime.changeSet = await loadChangeSet(runtime.info, baseCommit);
 				this.renderer.sync(runtime.info);
-				this.decorations.refresh();
+				this.notifyChangeSetsChanged();
 				this.renderStatusBar();
 			} catch (err) {
 				log.error(`could not reload the change set for ${runtime.info.rootFsPath}`, err);
@@ -361,7 +479,7 @@ export class Controller implements RenderHost, vscode.Disposable {
 			runtime.changeSet = undefined;
 			this.renderer.sync(repo);
 			this.content.invalidate();
-			this.decorations.refresh();
+			this.notifyChangeSetsChanged();
 			this.renderStatusBar();
 		}
 		this.onActiveEditorChanged();

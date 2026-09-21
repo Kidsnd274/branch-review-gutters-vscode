@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import type { Controller } from './controller';
 import type { RepoInfo } from './git/repositories';
-import { openChange, pickBase, showChangedFiles, showMenu } from './ui/pickers';
+import type { FileChange } from './changes/parse';
+import type { ChangeTarget } from './tree/changedFilesView';
+import { openChange, pickBase, showMenu } from './ui/pickers';
 import { basenamePosix } from './util/paths';
 import { neighbourIndex } from './util/navigation';
 import * as log from './util/log';
@@ -113,11 +115,11 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 	});
 
 	register('reviewGutters.showChangedFiles', async () => {
-		const repo = requireRepository(controller);
-		if (repo) {
-			await showChangedFiles(controller, repo);
-		}
+		await controller.focusChangedFiles();
 	});
+
+	register('reviewGutters.setTreeMode', () => controller.setViewMode('tree'));
+	register('reviewGutters.setListMode', () => controller.setViewMode('list'));
 
 	const jumpFile = async (delta: 1 | -1) => {
 		const repo = requireRepository(controller);
@@ -198,6 +200,78 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 			target.fileUri,
 			`${basenamePosix(rel)} (base ↔ working tree)`,
 		);
+	});
+
+	// Tree commands: the clicked node carries its repository and change, so they
+	// act on what was clicked rather than on the active editor.
+	const treeTarget = (arg: unknown): { repo: RepoInfo; change: FileChange } | undefined => {
+		const target = arg as ChangeTarget | undefined;
+		const repo = target ? controller.repositoryAt(target.rootFsPath) : undefined;
+		if (!repo || !target?.change) {
+			void vscode.window.showInformationMessage(
+				'Branch Review Gutters: that file is no longer in the change set. Refresh and try again.',
+			);
+			return undefined;
+		}
+		return { repo, change: target.change };
+	};
+
+	const workingUri = (repo: RepoInfo, relPath: string): vscode.Uri =>
+		vscode.Uri.joinPath(repo.rootUri, ...relPath.split('/'));
+
+	const needBaseUri = async (repo: RepoInfo, relPath: string): Promise<vscode.Uri | undefined> => {
+		const baseUri = await controller.baseUriFor(repo, workingUri(repo, relPath));
+		if (!baseUri) {
+			void vscode.window.showInformationMessage(
+				'Branch Review Gutters: no base version is available for this file.',
+			);
+		}
+		return baseUri;
+	};
+
+	register('reviewGutters.openFromTree', async (arg: unknown) => {
+		const target = treeTarget(arg);
+		if (target) {
+			await openChange(controller, target.repo, target.change);
+		}
+	});
+
+	register('reviewGutters.openBaseFromTree', async (arg: unknown) => {
+		const target = treeTarget(arg);
+		if (!target) {
+			return;
+		}
+		const baseUri = await needBaseUri(target.repo, target.change.path);
+		if (!baseUri) {
+			return;
+		}
+		const doc = await vscode.workspace.openTextDocument(baseUri);
+		await vscode.window.showTextDocument(doc, { preview: true });
+	});
+
+	register('reviewGutters.compareFromTree', async (arg: unknown) => {
+		const target = treeTarget(arg);
+		if (!target) {
+			return;
+		}
+		const fileUri = workingUri(target.repo, target.change.path);
+		const baseUri = await needBaseUri(target.repo, target.change.path);
+		if (!baseUri) {
+			return;
+		}
+		await vscode.commands.executeCommand(
+			'vscode.diff',
+			baseUri,
+			fileUri,
+			`${basenamePosix(target.change.path)} (base ↔ working tree)`,
+		);
+	});
+
+	register('reviewGutters.copyTreePath', async (arg: unknown) => {
+		const target = treeTarget(arg);
+		if (target) {
+			await vscode.env.clipboard.writeText(target.change.path);
+		}
 	});
 
 	register('reviewGutters.showLog', () => {

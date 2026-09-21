@@ -54,9 +54,13 @@ what your branch did to it, with every language feature intact.
   remote's default branch — or pick any branch, tag, ref or SHA yourself.
 - **Merge-base or exact comparison**, so you can review "everything my branch
   did" or "just this one commit".
-- **Changed-file navigation** — a quick pick of everything that differs from
-  the base (deletions included), plus next/previous changed file and
-  next/previous change within a file.
+- **Changed Files view** — a **Branch Review** activity-bar panel that lays
+  every file differing from the base out as a folder tree, switchable to a
+  flat list. One node per repository, described by its base ref and change
+  counts, coloured by the most serious change underneath it. Open a file,
+  open its base version, compare with the base, or copy its path from here.
+- **Changed-file navigation** — next/previous changed file and next/previous
+  change within a file, and the view follows the active editor as you switch.
 - **Live** — unsaved edits show up immediately, and checking out another
   branch in a terminal updates the gutter within a second or two.
 - **Read-only by construction** — a whitelist of git subcommands, `execFile`
@@ -97,9 +101,13 @@ code --install-extension branch-review-gutters-0.1.1.vsix --force
 3. **Browse the code as usual.** Changed lines are marked in the gutter;
    changed files are badged in the Explorer. Click a gutter marker to peek the
    original text.
-4. **Jump around** with *Show Changed Files…*, *Next Changed File*, or
+4. **Open the Branch Review view** — the activity-bar icon lists every changed
+   file as a folder tree, one node per repository. The title bar toggles
+   between the tree and a flat list; the node's context menu opens the file,
+   its base version, or a diff, and copies its path.
+5. **Jump around** with *Show Changed Files…*, *Next Changed File*, or
    *Next Change in File*.
-5. **Change the base** with *Select Base Branch or Commit…* if auto-detection
+6. **Change the base** with *Select Base Branch or Commit…* if auto-detection
    picked the wrong one — pick a branch, tag or SHA, then choose merge-base or
    exact mode.
 
@@ -117,7 +125,7 @@ All are under the **Review Gutters** category in the Command Palette.
 | Auto-detect Base Branch | Returns to automatic detection and reports what it found |
 | Refresh Comparison | Re-resolves the baseline and reloads the change set |
 | Clear Base Selection | Back to auto-detect; leaves the on/off state alone |
-| Show Changed Files… | Quick pick of everything that differs from the base, deletions included |
+| Show Changed Files… | Focuses the Changed Files view and reveals the file you are editing. The command id is unchanged, so existing keybindings keep working |
 | Next / Previous Changed File | Walks the sorted change set, wrapping at the ends |
 | Next / Previous Change in File | Delegates to VS Code's `editor.action.dirtydiff.next` / `.previous` |
 | Open Base Version of Current File | Opens the file as it is at the base, read-only |
@@ -150,6 +158,8 @@ Selections and the on/off state are remembered per repository, per workspace.
 | `reviewGutters.baseBranches` | `["main", "master"]` | Auto-detection candidates, in order |
 | `reviewGutters.remote` | `"origin"` | Remote for `<remote>/<branch>` fallbacks |
 | `reviewGutters.explorerBadges` | `true` | Explorer badges and colours |
+| `reviewGutters.viewMode` | `"tree"` | Changed Files view grouping: `"tree"` or `"list"`. The view's title-bar toggle overrides this for the workspace |
+| `reviewGutters.autoReveal` | `true` | Reveal the current file in the Changed Files view when switching editors |
 | `reviewGutters.maxFileSizeKB` | `1024` | Skip base versions larger than this |
 | `reviewGutters.excludeGlobs` | `[]` | Repo-relative globs never decorated, e.g. `["*.lock", "generated/**"]` |
 | `reviewGutters.logLevel` | `"info"` | Output channel verbosity |
@@ -171,8 +181,8 @@ Selections and the on/off state are remembered per repository, per workspace.
 - **Binary files** (a NUL in the first 8000 bytes) and files over
   `maxFileSizeKB` are skipped entirely, so no markers appear rather than
   false ones. The status bar tooltip counts them.
-- **Deleted files** have no Explorer node; they appear in the changed-files
-  picker and open read-only at the base version.
+- **Deleted files** have no Explorer node; they appear in the Changed Files
+  view and open read-only at the base version.
 - **Untracked files** are marked `U` and shown as entirely added.
 - The right-hand side of the comparison is always the **live buffer**, so
   uncommitted edits are included. There is no "committed changes only" mode.
@@ -238,7 +248,8 @@ code-review-git-diff-gutters/
 │   │   └── state.ts           # Per-repo persistence in workspace state
 │   ├── changes/
 │   │   ├── changeSet.ts       # The set of files differing from the base
-│   │   └── parse.ts           # diff --name-status / ls-files parsing
+│   │   ├── parse.ts           # diff --name-status / ls-files parsing
+│   │   └── style.ts           # kind → badge, colour, codicon, label (shared)
 │   ├── content/
 │   │   ├── baseContentProvider.ts  # TextDocumentContentProvider for base blobs
 │   │   ├── text.ts            # EOL and BOM normalisation
@@ -253,8 +264,11 @@ code-review-git-diff-gutters/
 │   │   └── shadowIndex.ts     # Throwaway index snapshot (see below)
 │   ├── rendering/
 │   │   └── quickDiff.ts       # The QuickDiffProvider itself
+│   ├── tree/
+│   │   ├── changeTree.ts      # Pure tree/list builder over the change set
+│   │   └── changedFilesView.ts# Tree data provider for the Changed Files view
 │   ├── ui/
-│   │   ├── pickers.ts         # Base and changed-file quick picks
+│   │   ├── pickers.ts         # Base picker and the status-bar menu
 │   │   ├── statusBar.ts       # Status bar item
 │   │   └── statusText.ts      # Label and tooltip formatting (unit-tested)
 │   └── util/                  # debounce, log, navigation, paths
@@ -267,7 +281,7 @@ code-review-git-diff-gutters/
 │   └── check-index-untouched.js
 ├── docs/
 │   └── spike-rendering.md     # Why Quick Diff, with evidence
-└── PLAN.md                    # Implementation plan, M0–M4
+└── PLAN.md                    # Implementation plan, M0–M5
 ```
 
 The rendering approach is not obvious and was decided by a spike — read
@@ -328,8 +342,8 @@ Run against the fixture repository before each VSIX build.
 3. `src/unchanged.ts` is **not** marked — the later commit on `main` must not
    appear when reviewing `feature`.
 4. The Explorer shows `M`, `A`, `R` and `U` badges with propagated folder
-   colours. The changed-files picker lists them and opens the base version for
-   deleted files.
+   colours. The Changed Files view lists the same files and opens the base
+   version for deleted ones.
 5. Select base `release/1.0` → markers change. Select `HEAD~1` with "compare
    exactly" → markers reflect only the last commit.
 6. `git checkout main` in a terminal → the status bar shows `(on base)` within
@@ -343,6 +357,33 @@ Run against the fixture repository before each VSIX build.
     fixture is still clean.
 12. `bin/blob.bin` gets no markers; `docs/crlf.txt` shows no spurious
     whole-file modification.
+13. The **Branch Review** activity-bar icon opens **Changed Files**: one node
+    per enabled repository, described by its base ref and counts
+    (`main · 4 M, 1 A, 1 U, 1 D, 1 R`), with folders coloured by the most
+    serious change underneath them.
+14. The title-bar toggle switches tree ⇄ list, and the choice survives a
+    window reload. It overrides `reviewGutters.viewMode` for this workspace
+    only; a fresh window with the toggle unused follows the setting.
+15. Reveal follows the active editor: open `src/modified.ts` and the view
+    selects it with its folders expanded. Open a file that is **not** in the
+    change set and nothing is selected. Set `reviewGutters.autoReveal: false`
+    and the view stops following.
+16. A deleted file opens its base version from the tree. `Open Base Version`
+    and `Compare with Base` are hidden on deleted, added and untracked nodes,
+    where there is no base to open; `Copy Path` works on everything that
+    still exists.
+17. Add a second root that has never been on screen. Its node reads
+    "not loaded yet" and `pgrep -fl "git (diff|ls-files)"` shows no git work
+    started for it.
+18. Expand a few folders, then hit refresh in the view title: the folders stay
+    expanded. (This is what the stable `TreeItem.id` buys; without it every
+    repaint collapses the tree.)
+19. Toggle review off → the view empties and the welcome content offers
+    **Enable Review Gutters**. With review on but no base resolvable it offers
+    **Select Base Branch or Commit…**; with a base and no changes it offers
+    **Refresh Comparison**.
+20. Set `reviewGutters.excludeGlobs` to a glob matching a changed file → it
+    disappears from the tree as well as from the Explorer.
 
 ## License
 

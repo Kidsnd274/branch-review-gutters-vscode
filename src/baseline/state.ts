@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { BaseSelection } from './resolver';
+import type { TreeMode } from '../tree/changeTree';
 
 export interface RepoState {
 	enabled: boolean;
@@ -7,6 +8,7 @@ export interface RepoState {
 }
 
 const KEY = 'reviewGutters.repos.v1';
+const VIEW_MODE_KEY = 'reviewGutters.viewMode.v1';
 
 export const DEFAULT_REPO_STATE: RepoState = { enabled: false, selection: { kind: 'auto' } };
 
@@ -50,5 +52,15 @@ export class StateStore {
 		const next: RepoState = { ...this.get(rootFsPath), ...patch };
 		await this.set(rootFsPath, next);
 		return next;
+	}
+
+	/** The workspace's view mode, if the title-bar toggle has been used. */
+	getViewMode(): TreeMode | undefined {
+		const stored = this.memento.get<string>(VIEW_MODE_KEY);
+		return stored === 'tree' || stored === 'list' ? stored : undefined;
+	}
+
+	async setViewMode(mode: TreeMode): Promise<void> {
+		await this.memento.update(VIEW_MODE_KEY, mode);
 	}
 }
