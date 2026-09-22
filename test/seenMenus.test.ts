@@ -16,8 +16,14 @@ const SEEN_FILES = UNSEEN_FILES.map((kind) => `${kind}${SEEN_SUFFIX}`);
 const FOLDERS = ['dir', 'dir~partial', 'dir~seen'];
 
 function entryFor(command: string): { command: string; when?: string } {
-	const entry = contextMenu.find((e) => e.command === command);
+	const entry = contextMenu.find((e) => e.command === command && e.group !== undefined && !e.group.startsWith('inline'));
 	assert.ok(entry, `package.json has no view/item/context entry for ${command}`);
+	return entry;
+}
+
+function inlineEntryFor(command: string): { command: string; when?: string } {
+	const entry = contextMenu.find((e) => e.command === command && e.group?.startsWith('inline'));
+	assert.ok(entry, `package.json has no inline view/item/context entry for ${command}`);
 	return entry;
 }
 
@@ -146,4 +152,30 @@ test('markSeenOnOpen is declared and defaults off', () => {
 	assert.ok(prop, 'reviewGutters.markSeenOnOpen is not declared');
 	assert.equal(prop.type, 'boolean');
 	assert.equal(prop.default, false);
+});
+
+test('every mark command is offered inline, on the same rows as in the menu', () => {
+	// The row action is what replaced the checkbox, so a mark command that is
+	// only in the context menu has no visible affordance at all. The two copies
+	// share a when clause, so a row can never offer one and not the other.
+	for (const command of [
+		'reviewGutters.markSeen',
+		'reviewGutters.markUnseen',
+		'reviewGutters.markFolderSeen',
+		'reviewGutters.markFolderUnseen',
+	]) {
+		assert.equal(inlineEntryFor(command).when, entryFor(command).when, `${command} inline/menu when clauses differ`);
+	}
+});
+
+test('every mark command has an icon, or its inline action would be invisible', () => {
+	for (const command of [
+		'reviewGutters.markSeen',
+		'reviewGutters.markUnseen',
+		'reviewGutters.markFolderSeen',
+		'reviewGutters.markFolderUnseen',
+	]) {
+		const declared = manifest.contributes.commands.find((c: { command: string }) => c.command === command);
+		assert.match(declared.icon ?? '', /^\$\([a-z-]+\)$/, `${command} needs a codicon for its inline action`);
+	}
 });

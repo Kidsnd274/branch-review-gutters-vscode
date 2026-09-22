@@ -1,13 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- Seen rows now **grey out** — label, change-kind icon and letter badge — so a
+  reviewed file reads as done at a glance instead of only by its tick.
+- The seen/unseen control moved off the left-hand checkbox onto the row's own
+  tick / cross actions on the right, next to the rest of the row's commands.
+  Folders get the same pair. VS Code cannot right-align a tree checkbox, so
+  the checkbox is gone rather than relocated.
+- **Fixed:** a seen mark could leave the view showing the row's old state.
+  Rendered rows are cached against the inputs the tree is built from, and the
+  seen state is not one of them, so any whole-view repaint reused stale rows —
+  which is what happened after marking a folder of more than 24 files, and
+  after any mark made while the view was hidden.
+- **Fixed:** the repository row mixed two denominators, counting `excludeGlobs`
+  files in its `8 M, 2 A, 1 D` summary but not in its `3/12 seen` tally.
+
 ## 0.1.3
 
-- Changed Files rows have a **seen / unseen** checkbox, so a long change set
+- Changed Files rows can be marked **seen / unseen**, so a long change set
   can be worked down without losing your place. Folders and the repository
   row carry the tally — `3/12 seen · main · 8 M, 2 A, 1 D`.
-- Folder bulk is in the context menu — **Mark Folder as Seen** and
-  **Mark Folder as Unseen** — where the aggregate can be named exactly,
-  rather than on a checkbox that has no tri-state.
+- Folder bulk is **Mark Folder as Seen** and **Mark Folder as Unseen**, where
+  the aggregate can be named exactly, rather than a checkbox with no
+  tri-state.
 - Marks are scoped to the base commit they were made against: resolving a
   different base clears that repository's marks, and a file reverted out of
   the change set loses its mark along with it.

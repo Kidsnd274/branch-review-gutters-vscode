@@ -247,6 +247,19 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		return this.view.resolveFile(element);
 	}
 
+	/**
+	 * Marks the file rows a tree command was invoked on — one row, or a whole
+	 * multi-selection. False when none of the arguments named a file still in a
+	 * change set, so the caller can say so.
+	 */
+	setSeenForRows(args: readonly unknown[], seen: boolean): boolean {
+		const groups = this.view.resolveFileSelection(args);
+		for (const group of groups) {
+			this.setSeen(group.repo, group.paths, seen);
+		}
+		return groups.length > 0;
+	}
+
 	/** Marks every visible file under the folder row a command was invoked on. */
 	markFolder(element: unknown, seen: boolean): boolean {
 		const folder = this.view.resolveFolder(element);
@@ -277,6 +290,10 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 	/** Repaints everything that reads a change set, and tells listeners. */
 	private notifyChangeSetsChanged(): void {
 		this.decorations.refresh();
+		// The seen tally is a function of the change set and the base, so a
+		// refresh moves it even though no mark was made — a base that advanced
+		// overnight invalidates every mark in the repository.
+		this.updateSeenContextKeys();
 		this.changeSetsChangedEmitter.fire();
 	}
 

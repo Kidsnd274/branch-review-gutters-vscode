@@ -59,10 +59,10 @@ what your branch did to it, with every language feature intact.
   flat list. One node per repository, described by its base ref and change
   counts, coloured by the most serious change underneath it. Open a file,
   open its base version, compare with the base, or copy its path from here.
-- **Seen / unseen per file** — tick a file in the Changed Files view as you
+- **Seen / unseen per file** — mark a file in the Changed Files view as you
   read it and work down a long change set without losing your place, the same
-  idea as GitHub's "Viewed" checkbox. Folders carry their own tally, and the
-  repository row reads `3/12 seen · main · 8 M, 2 A, 1 D`.
+  idea as GitHub's "Viewed" tick. A seen row greys out, folders carry their
+  own tally, and the repository row reads `3/12 seen · main · 8 M, 2 A, 1 D`.
 - **Changed-file navigation** — next/previous changed file and next/previous
   change within a file, and the view follows the active editor as you switch.
 - **Live** — unsaved edits show up immediately, and checking out another
@@ -138,16 +138,24 @@ All are under the **Review Gutters** category in the Command Palette.
 
 ### Marking files as seen
 
-Every file row in the Changed Files view has a checkbox. Tick it once you have
-read the file; the tally in the folder and repository rows moves with it. The
-row keeps its change-kind icon and letter badge — the checkbox carries only
-the seen bit.
+Hover a file row in the Changed Files view and use the tick action on the
+right; the row greys out and the tally in the folder and repository rows moves
+with it. The cross action puts it back. Both are on the right-click menu too,
+which is also how you mark a multi-selection in one go.
 
-Folders have no checkbox, because `TreeItemCheckboxState` has no tri-state and
-a half-read folder would read as untouched and mark everything inside it on
-the first click. Folder bulk lives in the context menu instead, where the
-aggregate is spelled out: **Mark Folder as Seen** appears on an untouched or
-half-seen folder, **Mark Folder as Unseen** on a finished or half-seen one.
+The row keeps its change-kind icon and letter badge, dimmed — a seen row still
+says what happened to the file. Greying works through a
+`FileDecorationProvider` keyed on a synthetic `review-seen:` uri that only this
+extension answers for: a tree row cannot colour its own label, and dimming the
+real file uri would grey the file out in the Explorer as well.
+
+There is deliberately no checkbox. VS Code draws tree checkboxes on the far
+left, away from the row's own actions, and `TreeItemCheckboxState` has no
+tri-state — so a half-read folder would read as untouched and its first click
+would mark everything inside it. Folders get the same pair of row actions as
+files, with the aggregate spelled out in the menu: **Mark Folder as Seen**
+appears on an untouched or half-seen folder, **Mark Folder as Unseen** on a
+finished or half-seen one. A folder whose every file is seen greys out too.
 
 Marks live in VS Code workspace storage, never in the working tree, and are
 **scoped to the resolved base commit**:
@@ -298,7 +306,8 @@ code-review-git-diff-gutters/
 │   │   └── quickDiff.ts       # The QuickDiffProvider itself
 │   ├── review/
 │   │   ├── seenState.ts       # Pure seen/unseen model and base-commit scoping
-│   │   └── seenStore.ts       # Per-repo seen marks in workspace storage
+│   │   ├── seenStore.ts       # Per-repo seen marks in workspace storage
+│   │   └── seenUri.ts         # Pure review-seen: uri, so a seen row can dim
 │   ├── tree/
 │   │   ├── changeTree.ts      # Pure tree/list builder over the change set
 │   │   └── changedFilesView.ts# Tree data provider for the Changed Files view
@@ -423,9 +432,10 @@ Run against the fixture repository before each VSIX build.
     **Refresh Comparison**.
 20. Set `reviewGutters.excludeGlobs` to a glob matching a changed file → it
     disappears from the tree as well as from the Explorer.
-21. Tick a file's checkbox → it becomes seen, the folder tally and the
-    repository row (`2/7 seen · main · …`) both move, and the row keeps its
-    change-kind icon and letter badge. Untick → the counts go back down.
+21. Use a file row's tick action → the row greys out, its icon and letter
+    badge dim with it, and the folder tally and the repository row
+    (`2/7 seen · main · …`) both move. The cross action → the row un-greys
+    and the counts go back down.
 22. Mark a file seen, then hit refresh in the view title: the mark survives
     **and** the folders you had expanded are still expanded.
 23. Mark several files seen, then **Select Base Branch or Commit…** to a
@@ -434,10 +444,13 @@ Run against the fixture repository before each VSIX build.
 24. Mark `src/modified.ts` seen, then restore it to its base content
     (`git checkout <merge-base> -- src/modified.ts`). It leaves the change
     set and its mark goes with it.
-25. **Mark Folder as Seen** on a half-seen folder marks everything under it
-    and the row's context menu flips to **Mark Folder as Unseen**; the
-    folder reads `n/n seen`. An untouched folder offers *Mark Folder as
-    Seen* only; a finished one offers *Mark Folder as Unseen* only.
+25. **Mark Folder as Seen** on a half-seen folder marks everything under it,
+    the folder reads `n/n seen` and greys out, and its row action flips to
+    **Mark Folder as Unseen**. An untouched folder offers *Mark Folder as
+    Seen* only; a finished one offers *Mark Folder as Unseen* only. Do it on
+    a folder holding **more than 24 files** and every row under it must grey
+    out at once — that count is the threshold where the view switches from
+    per-row repaints to one whole-view repaint.
 26. Mark a file seen and check its context menu still has **Open Base
     Version**, **Compare with Base** and **Copy Path** — the `~seen` suffix
     must not have hidden them.
@@ -454,6 +467,17 @@ Run against the fixture repository before each VSIX build.
     not the left-click payload, and these three regressed on exactly that.
 30. Right-click a **folder** row and use **Mark Folder as Seen** — it marks
     every file under that row, not whatever happens to be selected.
+31. Mark a file seen while the Changed Files view is **hidden** (collapse the
+    activity bar, or use `markSeenOnOpen`), then show the view again: the row
+    is already grey. No stale un-greyed row may survive the repaint.
+32. With `reviewGutters.excludeGlobs` hiding some changed files, the
+    repository row's `n/m seen` and its `8 M, 2 A` summary must count the
+    same files — the excluded ones in neither.
+33. Select several file rows (ctrl/cmd-click), right-click one of them and
+    **Mark as Seen** → all of them are marked. Then, with that selection
+    still live, hover a *different* row and click its tick action → only the
+    hovered row is marked. An inline action does not move the selection, so
+    it must not act on it.
 
 ## License
 

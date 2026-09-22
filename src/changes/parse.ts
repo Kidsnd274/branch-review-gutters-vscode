@@ -185,6 +185,15 @@ export function describeCounts(counts: Record<ChangeKind, number>): string {
 	return parts.join(', ');
 }
 
+/** Per-kind tally of exactly these changes, for a count that matches a filtered view. */
+export function countKinds(changes: readonly FileChange[]): Record<ChangeKind, number> {
+	const counts: Record<ChangeKind, number> = { ...ZERO_COUNTS };
+	for (const change of changes) {
+		counts[change.kind]++;
+	}
+	return counts;
+}
+
 export function totalChanges(counts: Record<ChangeKind, number>): number {
 	return Object.values(counts).reduce((a, b) => a + b, 0);
 }

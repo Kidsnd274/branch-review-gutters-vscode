@@ -167,13 +167,13 @@
         "command": "reviewGutters.markFolderSeen",
         "title": "Mark Folder as Seen",
         "category": "Review Gutters",
-        "icon": "$(check)"
+        "icon": "$(check-all)"
       },
       {
         "command": "reviewGutters.markFolderUnseen",
         "title": "Mark Folder as Unseen",
         "category": "Review Gutters",
-        "icon": "$(close)"
+        "icon": "$(close-all)"
       }
     ],
     "configuration": {
@@ -374,6 +374,26 @@
           "command": "reviewGutters.markFolderUnseen",
           "when": "view == reviewGutters.changedFiles && viewItem =~ /^dir~(seen|partial)$/",
           "group": "reviewGutters@4"
+        },
+        {
+          "command": "reviewGutters.markSeen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(added|untracked|modified|typeChanged|renamed|deleted)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "reviewGutters.markUnseen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(added|untracked|modified|typeChanged|renamed|deleted)~seen$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "reviewGutters.markFolderSeen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^dir($|~partial)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "reviewGutters.markFolderUnseen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^dir~(seen|partial)$/",
+          "group": "inline@2"
         }
       ]
     }

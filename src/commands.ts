@@ -277,19 +277,17 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 			'Branch Review Gutters: select a folder in the Changed Files view first.',
 		);
 
-	register('reviewGutters.markSeen', async (arg: unknown) => {
-		const target = treeTarget(arg);
-		if (target) {
-			controller.setSeen(target.repo, [target.change.path], true);
+	// Both directions take a whole selection: VS Code hands a tree command the
+	// invoked row first and the current selection second.
+	const mark = (args: unknown[], seen: boolean) => {
+		if (!controller.setSeenForRows(args, seen)) {
+			void vscode.window.showInformationMessage(
+				'Branch Review Gutters: that file is no longer in the change set. Refresh and try again.',
+			);
 		}
-	});
-
-	register('reviewGutters.markUnseen', async (arg: unknown) => {
-		const target = treeTarget(arg);
-		if (target) {
-			controller.setSeen(target.repo, [target.change.path], false);
-		}
-	});
+	};
+	register('reviewGutters.markSeen', (...args: unknown[]) => mark(args, true));
+	register('reviewGutters.markUnseen', (...args: unknown[]) => mark(args, false));
 
 	register('reviewGutters.markFolderSeen', (arg: unknown) => {
 		if (!controller.markFolder(arg, true)) {
