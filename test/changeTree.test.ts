@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildChangeTree, visibleChanges, type DirNode, type FileNode, type TreeNode } from '../src/tree/changeTree';
+import { buildChangeTree, visibleChanges, isDirNode, isFileNode, type DirNode, type FileNode, type TreeNode } from '../src/tree/changeTree';
 import { KIND_SEVERITY } from '../src/changes/style';
 import type { ChangeKind, FileChange } from '../src/changes/parse';
 
@@ -248,4 +248,44 @@ test('visibleChanges filters and sorts without touching its input', () => {
 		['b.ts'],
 	);
 	assert.equal(JSON.stringify(input), before);
+});
+
+test('isFileNode recognises the file rows a context menu hands back', () => {
+	const nodes = tree([change('modified', 'src/a.ts'), change('added', 'b.ts')]);
+	const file = asFile(nodes[1]);
+	assert.equal(isFileNode(file), true);
+	const nested = asFile(asDir(nodes[0]).children[0]);
+	assert.equal(isFileNode(nested), true);
+});
+
+test('isFileNode rejects folders and everything that is not a node', () => {
+	const nodes = tree([change('modified', 'src/a.ts')]);
+	assert.equal(isFileNode(asDir(nodes[0])), false);
+	assert.equal(isFileNode(undefined), false);
+	assert.equal(isFileNode(null), false);
+	assert.equal(isFileNode('src/a.ts'), false);
+	assert.equal(isFileNode(42), false);
+	assert.equal(isFileNode({ type: 'file' }), false);
+	assert.equal(isFileNode({ type: 'file', path: 'a.ts' }), false);
+	assert.equal(isFileNode({ type: 'file', path: 1, change: change('modified', 'a.ts') }), false);
+	assert.equal(isFileNode({ type: 'dir', path: 'a.ts', change: change('modified', 'a.ts') }), false);
+});
+
+test('isDirNode recognises folder rows and nothing else', () => {
+	const nodes = tree([change('modified', 'src/a.ts'), change('added', 'b.ts')]);
+	assert.equal(isDirNode(asDir(nodes[0])), true);
+	assert.equal(isDirNode(asFile(nodes[1])), false);
+	assert.equal(isDirNode(undefined), false);
+	assert.equal(isDirNode({ type: 'dir', path: 'src' }), false);
+	assert.equal(isDirNode({ type: 'dir', children: [] }), false);
+});
+
+test('a command payload is not a node and a node is not a command payload', () => {
+	// resolveFile has to tell these apart: left-click brings the payload, the
+	// context menu brings the element. Neither must satisfy the other's shape.
+	const nodes = tree([change('modified', 'src/a.ts'), change('added', 'b.ts')]);
+	const file = asFile(nodes[1]);
+	const payload = { rootFsPath: '/repo', change: file.change };
+	assert.equal(isFileNode(payload), false);
+	assert.equal('rootFsPath' in file, false);
 });

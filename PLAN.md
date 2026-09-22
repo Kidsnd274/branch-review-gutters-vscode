@@ -585,6 +585,7 @@ Creates `$TMPDIR/review-gutters-fixture` with:
 | M3 Files | `changeSet.ts`, Explorer badges, changed-files picker, next/previous changed file, rename handling | QA items 4–5 pass |
 | M4 Hardening | edge cases in Section 8, constraints checklist Section 9, README, CHANGELOG, VSIX build, full QA | all QA items pass; checklist all ticked |
 | M5 Changed Files view | `changes/style.ts`, `tree/changeTree.ts`, `tree/changedFilesView.ts`, the Branch Review activity-bar container, the tree/list toggle, auto-reveal, `showChangedFiles` repointed at the view | README QA items 13–20 pass; still no new git subcommands |
+| M6 Seen state | `review/seenState.ts`, `review/seenStore.ts`, the file-row checkbox and folder tallies, the four seen commands, `markSeenOnOpen` | README QA items 21–28 pass; still no new git subcommands |
 
 Commit at each milestone boundary with a descriptive message. Do not push.
 
@@ -624,6 +625,66 @@ quick pick described in 6.10.
   the setting. No `ConfigurationTarget` writes, per the Section 9 checklist.
 - **`showChangedFiles` keeps its command id** and now focuses the view, so
   existing user keybindings survive.
+
+### M6 — Seen state (0.1.3)
+
+Per-file seen/unseen in the Changed Files view. It renders from the change set
+the controller already owns: **no new git subcommands**, so the `args.ts`
+whitelist and the "repository is never written to" guarantee are untouched.
+State lives in `workspaceState["reviewGutters.seen.v1"]`, never in the
+working tree.
+
+- **A mark is scoped to the resolved base commit.** `nameStatusArgs` yields
+  path and kind only — no blob hash — so the extension cannot tell "you
+  edited a file you had already marked" from "nothing happened". A mark
+  therefore counts only while `entry.baseCommit` equals the current resolved
+  base. Moving the base, or having the merge base advance underneath you,
+  resets the marks. That is the honest reading and the safe direction for a
+  review tool: it errs toward showing files again, never toward hiding a
+  diff nobody has read.
+- **`manageCheckboxStateManually: true` is mandatory.** Without it VS Code
+  cascades a parent's checkbox into its children, which fights the store the
+  moment folder bulk exists.
+- **Folders get no checkbox.** `TreeItemCheckboxState` has no tri-state, so
+  a half-seen folder would read as unchecked and its first click would mark
+  everything inside it. Folder bulk is context-menu only, where the
+  aggregate is explicit in the label.
+- **Targeted repaint, never a whole-view repaint per toggle.** A seen flip
+  moves none of the inputs `RepoTree` caches on (mode, exclusion signature,
+  change-set identity, loading, has-base), so the cached `TreeItem` must be
+  dropped explicitly for the file, every ancestor folder, and the repository
+  node, then `onDidChangeTreeData` fired per invalidated node. Bulk paths
+  above the threshold fire `undefined` once instead. M5's stable
+  `TreeItem.id` is what makes this possible without collapsing the tree.
+- **`contextValue` carries the seen bit as a `~seen` suffix.** Three existing
+  anchored `when` clauses had to gain `(~seen)?` or every tree menu entry
+  would have silently vanished the first time a file was marked — the
+  highest-probability mistake in the change, now pinned by
+  `test/seenMenus.test.ts`, which reads the real manifest.
+- **The controller owns staleness.** The view asks `isSeen` / `seenProgress`
+  / `folderSeen` and never sees a base commit, so no view code can get the
+  scoping wrong.
+- **Bounded growth.** Prune-on-successful-load drops marks for paths that
+  left the change set; never prune an unloaded repository, or startup wipes
+  real state. Base scoping makes stale entries inert before they are even
+  deleted, and a per-repository cap drops the oldest marks past 2000.
+- **`markSeenOnOpen` defaults off** and skips any non-`file` scheme, so
+  opening a base-version editor never marks the working-tree copy.
+- **Terminology is `seen` everywhere** — command ids, types, settings, labels.
+  "Reviewed" would collide with the gutter feature itself.
+- **A context-menu command receives the tree element, not
+  `TreeItem.command.arguments`.** Verified against the 1.138.0 source: the
+  item context menu sets `getActionsContext()` to
+  `{ $treeViewId, $treeItemHandle }`, the menu is read with
+  `shouldForwardArgs: true`, and `$executeContributedCommand` runs the
+  argument processors that map the handle back through
+  `getExtensionElement` to the object we handed `getTreeItem`. Only
+  `onDidOpen` — left-click — reads `command.arguments`. This is why
+  `ChangedFilesView.resolveFile` / `resolveFolder` exist and take `unknown`:
+  every tree command must accept the payload *and* the element. It is also a
+  live bug this milestone fixed — `openBaseFromTree`, `compareFromTree` and
+  `copyTreePath` are context-menu-only and were falling into their
+  "no longer in the change set" guard.
 
 ---
 

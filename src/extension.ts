@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { RepositoryService } from './git/repositories';
 import { StateStore } from './baseline/state';
+import { SeenStore } from './review/seenStore';
 import { Controller } from './controller';
 import { registerCommands } from './commands';
 import * as log from './util/log';
@@ -14,7 +15,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	await repositories.initialize();
 
 	const store = new StateStore(context.workspaceState);
-	const controller = new Controller(repositories, store);
+	const seenStore = new SeenStore(context.workspaceState);
+	const controller = new Controller(repositories, store, seenStore);
 	context.subscriptions.push(controller);
 
 	registerCommands(context, controller);

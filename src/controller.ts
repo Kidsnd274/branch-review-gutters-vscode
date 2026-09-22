@@ -3,13 +3,15 @@ import { RepositoryService, type RepoInfo } from './git/repositories';
 import { StateStore, type RepoState } from './baseline/state';
 import { resolveBaseline, sameSelection, type BaseSelection, type Baseline } from './baseline/resolver';
 import { loadChangeSet } from './changes/changeSet';
-import { describeCounts, totalChanges, type ChangeSet } from './changes/parse';
+import { describeCounts, totalChanges, type ChangeSet, type FileChange } from './changes/parse';
 import { BaseContentProvider } from './content/baseContentProvider';
 import { QuickDiffRenderer, type RenderHost } from './rendering/quickDiff';
 import { isRenderableBaseline } from './baseline/selection';
 import { ReviewFileDecorationProvider } from './explorer/fileDecorations';
 import { ChangedFilesView, VIEW_ID, type TreeHost } from './tree/changedFilesView';
 import { type TreeMode, visibleChanges } from './tree/changeTree';
+import { SeenStore } from './review/seenStore';
+import * as seenState from './review/seenState';
 import { StatusBar } from './ui/statusBar';
 import { readConfig, CONFIG_SECTION, type Config } from './config';
 import { isDotGitPath, makeGlobMatcher } from './util/paths';
@@ -53,6 +55,7 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 	constructor(
 		private readonly repositories: RepositoryService,
 		private readonly store: StateStore,
+		private readonly seenStore: SeenStore,
 	) {
 		this.config = readConfig();
 		this.isExcludedPath = makeGlobMatcher(this.config.excludeGlobs);
@@ -197,6 +200,80 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		return JSON.stringify(this.config.excludeGlobs);
 	}
 
+	/**
+	 * Base-commit scoping is applied at read time so the view never reasons
+	 * about staleness. A repository with no base reads as the empty string,
+	 * which no stored mark can match, because a mark always carries a real sha.
+	 */
+	private seenBaseOf(repo: RepoInfo): string {
+		return this.getBaseline(repo)?.baseCommit ?? '';
+	}
+
+	isSeen(repo: RepoInfo, relPath: string): boolean {
+		return seenState.isSeen(this.seenStore.get(repo.rootFsPath), relPath, this.seenBaseOf(repo));
+	}
+
+	seenProgress(repo: RepoInfo, relPaths: readonly string[]): { seen: number; total: number } {
+		const seen = seenState.countSeen(this.seenStore.get(repo.rootFsPath), relPaths, this.seenBaseOf(repo));
+		return { seen, total: relPaths.length };
+	}
+
+	folderSeen(repo: RepoInfo, relPaths: readonly string[]): seenState.FolderSeen {
+		return seenState.folderSeenState(this.seenStore.get(repo.rootFsPath), relPaths, this.seenBaseOf(repo));
+	}
+
+	setSeen(repo: RepoInfo, relPaths: readonly string[], seen: boolean): void {
+		const baseCommit = this.getBaseline(repo)?.baseCommit;
+		if (!baseCommit || relPaths.length === 0) {
+			return;
+		}
+		const root = repo.rootFsPath;
+		const write = seen
+			? this.seenStore.markAll(root, relPaths, baseCommit)
+			: this.seenStore.unmarkAll(root, relPaths);
+		void write
+			.then((changed) => {
+				if (!changed) {
+					return;
+				}
+				this.view.invalidateSeen(root, relPaths);
+				this.updateSeenContextKeys();
+			})
+			.catch((err) => log.error(`could not save the seen state for ${root}`, err));
+	}
+
+	/** Resolves a command argument — left-click payload or tree element — to its change. */
+	resolveTreeFile(element: unknown): { repo: RepoInfo; change: FileChange } | undefined {
+		return this.view.resolveFile(element);
+	}
+
+	/** Marks every visible file under the folder row a command was invoked on. */
+	markFolder(element: unknown, seen: boolean): boolean {
+		const folder = this.view.resolveFolder(element);
+		if (!folder) {
+			return false;
+		}
+		this.setSeen(folder.repo, folder.paths, seen);
+		return true;
+	}
+
+	private updateSeenContextKeys(): void {
+		let seen = 0;
+		let total = 0;
+		const repo = this.activeRepository();
+		const baseCommit = repo ? this.getBaseline(repo)?.baseCommit : undefined;
+		const changeSet = repo ? this.getChangeSet(repo) : undefined;
+		if (repo && baseCommit && changeSet) {
+			const visible = visibleChanges(changeSet.all(), (rel) => this.isExcluded(rel));
+			const tally = seenState.seenProgress(this.seenStore.get(repo.rootFsPath), visible, baseCommit);
+			seen = tally.seen;
+			total = tally.total;
+		}
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.seenCount', seen);
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.unseenCount', total - seen);
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.allSeen', total > 0 && seen === total);
+	}
+
 	/** Repaints everything that reads a change set, and tells listeners. */
 	private notifyChangeSetsChanged(): void {
 		this.decorations.refresh();
@@ -278,6 +355,55 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		// excluded would otherwise leave the view empty with no welcome state.
 		void vscode.commands.executeCommand('setContext', 'reviewGutters.hasChanges', this.hasVisibleChanges(repo));
 		void vscode.commands.executeCommand('setContext', 'reviewGutters.viewMode', this.viewModeValue);
+		this.updateSeenContextKeys();
+		this.markActiveFileSeenIfSet();
+	}
+
+	/**
+	 * `markSeenOnOpen`, hooked onto the editor listener that already runs rather
+	 * than a new one. Off by default: with it on, preview-clicking through the
+	 * tree marks everything it opens.
+	 */
+	private markActiveFileSeenIfSet(): void {
+		if (!this.config.markSeenOnOpen) {
+			return;
+		}
+		const doc = vscode.window.activeTextEditor?.document;
+		// Base-version editors use the review-base scheme. Opening one of those is
+		// looking at the old file, not reviewing the working-tree copy, so it
+		// must not mark it.
+		if (!doc || doc.uri.scheme !== 'file') {
+			return;
+		}
+		const repo = this.repositories.getRepositoryFor(doc.uri);
+		if (!repo || !this.isEnabled(repo)) {
+			return;
+		}
+		const changeSet = this.getChangeSet(repo);
+		if (!changeSet || !this.getBaseline(repo)?.baseCommit) {
+			return;
+		}
+		const rel = this.repositories.relativePath(repo, doc.uri);
+		if (!rel || isDotGitPath(rel) || this.isExcluded(rel) || !changeSet.byPath.has(rel)) {
+			return;
+		}
+		this.setSeen(repo, [rel], true);
+	}
+
+	/**
+	 * A file that has left the comparison takes its mark with it. Only ever
+	 * called once a change set has actually been produced: pruning a repository
+	 * that has not loaded yet would wipe real state on startup.
+	 */
+	private pruneSeenTo(runtime: RepoRuntime): void {
+		const changeSet = runtime.changeSet;
+		if (!changeSet) {
+			return;
+		}
+		const live = new Set<string>([...changeSet.byPath.keys(), ...changeSet.deleted.map((c) => c.path)]);
+		void this.seenStore.prune(runtime.info.rootFsPath, live).catch((err) =>
+			log.error(`could not prune the seen state for ${runtime.info.rootFsPath}`, err),
+		);
 	}
 
 	private hasVisibleChanges(repo: RepoInfo | undefined): boolean {
@@ -418,6 +544,7 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 			this.content.invalidate();
 		}
 
+		this.pruneSeenTo(runtime);
 		this.renderer.sync(runtime.info);
 		this.notifyChangeSetsChanged();
 		this.renderStatusBar();
@@ -432,6 +559,7 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 			}
 			try {
 				runtime.changeSet = await loadChangeSet(runtime.info, baseCommit);
+				this.pruneSeenTo(runtime);
 				this.renderer.sync(runtime.info);
 				this.notifyChangeSetsChanged();
 				this.renderStatusBar();

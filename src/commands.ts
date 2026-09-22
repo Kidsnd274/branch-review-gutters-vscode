@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import type { Controller } from './controller';
 import type { RepoInfo } from './git/repositories';
 import type { FileChange } from './changes/parse';
-import type { ChangeTarget } from './tree/changedFilesView';
 import { openChange, pickBase, showMenu } from './ui/pickers';
 import { basenamePosix } from './util/paths';
 import { neighbourIndex } from './util/navigation';
@@ -202,18 +201,17 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 		);
 	});
 
-	// Tree commands: the clicked node carries its repository and change, so they
-	// act on what was clicked rather than on the active editor.
+	// Tree commands: a left-click hands us the payload we baked into
+	// `TreeItem.command.arguments`, a context-menu command hands us the tree
+	// element itself. The view resolves both.
 	const treeTarget = (arg: unknown): { repo: RepoInfo; change: FileChange } | undefined => {
-		const target = arg as ChangeTarget | undefined;
-		const repo = target ? controller.repositoryAt(target.rootFsPath) : undefined;
-		if (!repo || !target?.change) {
+		const target = controller.resolveTreeFile(arg);
+		if (!target) {
 			void vscode.window.showInformationMessage(
 				'Branch Review Gutters: that file is no longer in the change set. Refresh and try again.',
 			);
-			return undefined;
 		}
-		return { repo, change: target.change };
+		return target;
 	};
 
 	const workingUri = (repo: RepoInfo, relPath: string): vscode.Uri =>
@@ -271,6 +269,37 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 		const target = treeTarget(arg);
 		if (target) {
 			await vscode.env.clipboard.writeText(target.change.path);
+		}
+	});
+
+	const noFolder = () =>
+		void vscode.window.showInformationMessage(
+			'Branch Review Gutters: select a folder in the Changed Files view first.',
+		);
+
+	register('reviewGutters.markSeen', async (arg: unknown) => {
+		const target = treeTarget(arg);
+		if (target) {
+			controller.setSeen(target.repo, [target.change.path], true);
+		}
+	});
+
+	register('reviewGutters.markUnseen', async (arg: unknown) => {
+		const target = treeTarget(arg);
+		if (target) {
+			controller.setSeen(target.repo, [target.change.path], false);
+		}
+	});
+
+	register('reviewGutters.markFolderSeen', (arg: unknown) => {
+		if (!controller.markFolder(arg, true)) {
+			noFolder();
+		}
+	});
+
+	register('reviewGutters.markFolderUnseen', (arg: unknown) => {
+		if (!controller.markFolder(arg, false)) {
+			noFolder();
 		}
 	});
 

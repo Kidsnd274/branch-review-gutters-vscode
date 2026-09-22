@@ -13,6 +13,27 @@ export type TreeNode =
 export type DirNode = Extract<TreeNode, { type: 'dir' }>;
 export type FileNode = Extract<TreeNode, { type: 'file' }>;
 
+/**
+ * A context-menu command is handed the tree element itself, not whatever the
+ * item's `command.arguments` carried, so a command that can be invoked that
+ * way has to recognise the node by shape rather than assume a payload.
+ */
+export function isFileNode(value: unknown): value is FileNode {
+	if (typeof value !== 'object' || value === null) {
+		return false;
+	}
+	const node = value as Partial<FileNode>;
+	return node.type === 'file' && typeof node.path === 'string' && typeof node.change === 'object' && node.change !== null;
+}
+
+export function isDirNode(value: unknown): value is DirNode {
+	if (typeof value !== 'object' || value === null) {
+		return false;
+	}
+	const node = value as Partial<DirNode>;
+	return node.type === 'dir' && typeof node.path === 'string' && Array.isArray(node.children);
+}
+
 export interface ChangeTreeOptions {
 	mode: TreeMode;
 	isExcluded(rel: string): boolean;

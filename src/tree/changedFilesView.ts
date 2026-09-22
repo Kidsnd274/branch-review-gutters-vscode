@@ -4,13 +4,24 @@ import type { Baseline } from '../baseline/selection';
 import type { ChangeSet, FileChange } from '../changes/parse';
 import { describeCounts, ZERO_COUNTS } from '../changes/parse';
 import { styleFor } from '../changes/style';
-import { buildChangeTree, type DirNode, type FileNode, type TreeNode, type TreeMode } from './changeTree';
+import {
+	buildChangeTree,
+	isDirNode,
+	isFileNode,
+	type DirNode,
+	type FileNode,
+	type TreeNode,
+	type TreeMode,
+} from './changeTree';
+import type { FolderSeen } from '../review/seenState';
 import { basenamePosix, dirnamePosix } from '../util/paths';
 import * as log from '../util/log';
 
 /** Everything the view needs from the controller. */
 export interface TreeHost {
 	knownRepositories(): readonly RepoInfo[];
+	/** The repository with exactly this root, as a command payload names it. */
+	repositoryAt(rootFsPath: string): RepoInfo | undefined;
 	isEnabled(repo: RepoInfo): boolean;
 	/** False until one of the repository's files has been on screen. */
 	isTouched(repo: RepoInfo): boolean;
@@ -20,6 +31,10 @@ export interface TreeHost {
 	/** Changes when the exclusion settings change, so caches can key off it. */
 	excludeSignature(): string;
 	viewMode(): TreeMode;
+	isSeen(repo: RepoInfo, rel: string): boolean;
+	seenProgress(repo: RepoInfo, relPaths: readonly string[]): { seen: number; total: number };
+	folderSeen(repo: RepoInfo, relPaths: readonly string[]): FolderSeen;
+	setSeen(repo: RepoInfo, relPaths: readonly string[], seen: boolean): void;
 }
 
 export interface RepoNode {
@@ -39,6 +54,9 @@ type RepoState = 'notLoaded' | 'noBase' | 'noChanges' | 'ready';
 
 export const VIEW_ID = 'reviewGutters.changedFiles';
 
+/** Past this many rows, one whole-view repaint beats one event per row. */
+const BULK_REPAINT_PATHS = 24;
+
 function repoItemId(rootFsPath: string, mode: TreeMode): string {
 	return `${rootFsPath}\u0000${mode}\u0000repo`;
 }
@@ -55,9 +73,11 @@ class RepoTree {
 	readonly node: RepoNode;
 	readonly roots: TreeNode[];
 	readonly state: RepoState;
+	readonly allFiles: string[];
 	private readonly parents = new Map<string, ViewNode>();
 	private readonly byRelPath = new Map<string, TreeNode>();
 	private readonly items = new Map<string, vscode.TreeItem>();
+	private readonly filesUnderDir = new Map<string, string[]>();
 	private repoItemValue?: vscode.TreeItem;
 
 	constructor(
@@ -76,7 +96,7 @@ class RepoTree {
 				? []
 				: buildChangeTree(changeSet.all(), { mode, isExcluded: (rel) => this.host.isExcluded(rel) });
 		this.state = loading ? 'notLoaded' : !hasBase ? 'noBase' : this.roots.length === 0 ? 'noChanges' : 'ready';
-		this.index(this.roots, this.node);
+		this.allFiles = this.index(this.roots, this.node);
 	}
 
 	repoItem(): vscode.TreeItem {
@@ -117,16 +137,40 @@ class RepoTree {
 		return this.byRelPath.get(relPath);
 	}
 
-	private index(nodes: TreeNode[], parent: ViewNode): void {
+	private index(nodes: TreeNode[], parent: ViewNode): string[] {
+		const files: string[] = [];
 		for (const node of nodes) {
 			this.owner.set(node, this);
 			this.parents.set(nodeId(this.repo.rootFsPath, this.mode, node), parent);
 			if (node.type === 'file') {
 				this.byRelPath.set(node.path, node);
-			} else {
-				this.index(node.children, node);
+				files.push(node.path);
+				continue;
 			}
+			const under = this.index(node.children, node);
+			this.filesUnderDir.set(node.path, under);
+			files.push(...under);
 		}
+		return files;
+	}
+
+	filesUnder(dirPath: string): readonly string[] {
+		return this.filesUnderDir.get(dirPath) ?? [];
+	}
+
+	/**
+	 * Drops the cached items so the next `getTreeItem` rebuilds them from the
+	 * store. A seen toggle moves none of the inputs the cache is keyed on, so
+	 * without this the row would never repaint.
+	 */
+	dropItems(nodes: readonly TreeNode[]): void {
+		for (const node of nodes) {
+			this.items.delete(nodeId(this.repo.rootFsPath, this.mode, node));
+		}
+	}
+
+	dropRepoItem(): void {
+		this.repoItemValue = undefined;
 	}
 
 	private repoDescription(): string {
@@ -140,7 +184,9 @@ class RepoTree {
 			return 'no changes';
 		}
 		const baseRef = this.host.getBaseline(this.repo)?.baseRef ?? 'base';
-		return `${baseRef} · ${describeCounts(this.changeSet?.counts ?? ZERO_COUNTS)}`;
+		const { seen } = this.host.seenProgress(this.repo, this.allFiles);
+		const counts = describeCounts(this.changeSet?.counts ?? ZERO_COUNTS);
+		return `${seen}/${this.allFiles.length} seen · ${baseRef} · ${counts}`;
 	}
 
 	private repoTooltip(): string {
@@ -162,8 +208,20 @@ class RepoTree {
 		const style = styleFor(node.hint);
 		const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Collapsed);
 		item.iconPath = new vscode.ThemeIcon('folder', new vscode.ThemeColor(style.color));
-		item.contextValue = 'dir';
-		item.tooltip = `${node.path} — ${style.label.toLowerCase()} underneath`;
+		const under = this.filesUnder(node.path);
+		const aggregate = this.host.folderSeen(this.repo, under);
+		// The aggregate rides on contextValue so the menu can name it exactly.
+		// A checkbox cannot carry it: TreeItemCheckboxState has no tri-state, so
+		// a half-seen folder would read as unchecked and its first click would
+		// mark everything inside.
+		item.contextValue = aggregate === 'none' ? 'dir' : `dir~${aggregate}`;
+		if (aggregate !== 'none') {
+			const { seen } = this.host.seenProgress(this.repo, under);
+			item.description = `${seen}/${under.length} seen`;
+			item.tooltip = `${node.path} — ${seen} of ${under.length} seen`;
+		} else {
+			item.tooltip = `${node.path} — ${style.label.toLowerCase()} underneath`;
+		}
 		return item;
 	}
 
@@ -171,6 +229,7 @@ class RepoTree {
 		const change = node.change;
 		const style = styleFor(change.kind);
 		const deleted = change.kind === 'deleted';
+		const seen = this.host.isSeen(this.repo, node.path);
 		const item = new vscode.TreeItem(basenamePosix(node.path), vscode.TreeItemCollapsibleState.None);
 		item.description = this.mode === 'list' ? dirnamePosix(node.path) || '.' : style.label;
 		item.iconPath = new vscode.ThemeIcon(style.codicon, new vscode.ThemeColor(style.color));
@@ -178,7 +237,12 @@ class RepoTree {
 		if (!deleted) {
 			item.resourceUri = vscode.Uri.joinPath(this.repo.rootUri, ...node.path.split('/'));
 		}
-		item.contextValue = change.kind;
+		// The row keeps its change-kind icon and letter badge; the checkbox
+		// carries only the seen bit.
+		item.checkboxState = seen
+			? { state: vscode.TreeItemCheckboxState.Checked, tooltip: 'Seen — click to unmark' }
+			: { state: vscode.TreeItemCheckboxState.Unchecked, tooltip: 'Mark as seen' };
+		item.contextValue = seen ? `${change.kind}~seen` : change.kind;
 		item.tooltip = this.fileTooltip(change);
 		item.command = {
 			command: 'reviewGutters.openFromTree',
@@ -220,6 +284,9 @@ export class ChangedFilesView implements vscode.TreeDataProvider<ViewNode>, vsco
 		this.treeView = vscode.window.createTreeView(VIEW_ID, {
 			treeDataProvider: this,
 			showCollapseAll: true,
+			// Without this VS Code cascades a parent's checkbox into its children,
+			// which fights the store the moment a folder is toggled.
+			manageCheckboxStateManually: true,
 		});
 		this.disposables.push(
 			this.onDidChangeTreeDataEmitter,
@@ -227,6 +294,26 @@ export class ChangedFilesView implements vscode.TreeDataProvider<ViewNode>, vsco
 			this.treeView.onDidChangeVisibility(() => {
 				if (this.treeView.visible) {
 					this.refresh();
+				}
+			}),
+			this.treeView.onDidChangeCheckboxState((event) => {
+				const groups = new Map<string, { repo: RepoInfo; seen: boolean; paths: string[] }>();
+				for (const [element, state] of event.items) {
+					if (element.type !== 'file') {
+						continue;
+					}
+					const tree = this.owner.get(element);
+					if (!tree) {
+						continue;
+					}
+					const seen = state === vscode.TreeItemCheckboxState.Checked;
+					const key = `${tree.repo.rootFsPath}\u0000${seen}`;
+					const group = groups.get(key) ?? { repo: tree.repo, seen, paths: [] };
+					group.paths.push(element.path);
+					groups.set(key, group);
+				}
+				for (const group of groups.values()) {
+					this.host.setSeen(group.repo, group.paths, group.seen);
 				}
 			}),
 		);
@@ -264,6 +351,89 @@ export class ChangedFilesView implements vscode.TreeDataProvider<ViewNode>, vsco
 		} catch (err) {
 			log.debug(`could not reveal ${relPath}: ${err instanceof Error ? err.message : String(err)}`);
 		}
+	}
+
+	/**
+	 * Repaints the rows a seen toggle touched: the files, every folder above
+	 * them, and the repository row, whose description carries the count. A
+	 * targeted fire per node rather than a whole-view repaint keeps the user's
+	 * expansion state, which the stable node ids make possible.
+	 */
+	invalidateSeen(repoRootFsPath: string, relPaths: readonly string[]): void {
+		if (relPaths.length === 0 || !this.treeView.visible) {
+			return;
+		}
+		const tree = this.trees.get(repoRootFsPath);
+		if (!tree) {
+			return;
+		}
+		if (relPaths.length > BULK_REPAINT_PATHS) {
+			this.refresh();
+			return;
+		}
+		const nodes: TreeNode[] = [];
+		const pushed = new Set<string>();
+		const push = (node: TreeNode): void => {
+			const id = nodeId(repoRootFsPath, tree.mode, node);
+			if (pushed.has(id)) {
+				return;
+			}
+			pushed.add(id);
+			nodes.push(node);
+		};
+		for (const relPath of relPaths) {
+			const fileNode = tree.fileNode(relPath);
+			if (!fileNode) {
+				continue;
+			}
+			push(fileNode);
+			for (let parent = tree.parentOf(fileNode); parent && parent.type === 'dir'; parent = tree.parentOf(parent)) {
+				push(parent);
+			}
+		}
+		if (nodes.length === 0) {
+			return;
+		}
+		tree.dropItems(nodes);
+		tree.dropRepoItem();
+		for (const node of nodes) {
+			this.onDidChangeTreeDataEmitter.fire(node);
+		}
+		this.onDidChangeTreeDataEmitter.fire(tree.node);
+	}
+
+	/**
+	 * The repository and change behind whatever a command was handed.
+	 *
+	 * A left-click delivers the payload baked into `TreeItem.command.arguments`;
+	 * a context-menu command delivers the tree element itself, which VS Code
+	 * converts back from the item's handle. They are different objects, so any
+	 * tree command has to accept both.
+	 */
+	resolveFile(element: unknown): { repo: RepoInfo; change: FileChange } | undefined {
+		const target = element as ChangeTarget | null | undefined;
+		if (target && typeof target.rootFsPath === 'string' && target.change) {
+			const repo = this.host.repositoryAt(target.rootFsPath);
+			return repo ? { repo, change: target.change } : undefined;
+		}
+		if (isFileNode(element)) {
+			const tree = this.owner.get(element);
+			return tree ? { repo: tree.repo, change: element.change } : undefined;
+		}
+		return undefined;
+	}
+
+	/** The folder row a command was invoked on, and every visible file under it. */
+	resolveFolder(element: unknown): { repo: RepoInfo; dirPath: string; paths: readonly string[] } | undefined {
+		if (!isDirNode(element)) {
+			return undefined;
+		}
+		const tree = this.owner.get(element);
+		if (!tree) {
+			return undefined;
+		}
+		const paths = tree.filesUnder(element.path);
+		return paths.length > 0 ? { repo: tree.repo, dirPath: element.path, paths } : undefined;
 	}
 
 	getChildren(element?: ViewNode): vscode.ProviderResult<ViewNode[]> {

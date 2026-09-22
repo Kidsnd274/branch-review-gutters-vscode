@@ -59,6 +59,10 @@ what your branch did to it, with every language feature intact.
   flat list. One node per repository, described by its base ref and change
   counts, coloured by the most serious change underneath it. Open a file,
   open its base version, compare with the base, or copy its path from here.
+- **Seen / unseen per file** — tick a file in the Changed Files view as you
+  read it and work down a long change set without losing your place, the same
+  idea as GitHub's "Viewed" checkbox. Folders carry their own tally, and the
+  repository row reads `3/12 seen · main · 8 M, 2 A, 1 D`.
 - **Changed-file navigation** — next/previous changed file and next/previous
   change within a file, and the view follows the active editor as you switch.
 - **Live** — unsaved edits show up immediately, and checking out another
@@ -132,6 +136,33 @@ All are under the **Review Gutters** category in the Command Palette.
 | Compare Current File with Base | Opens a normal diff editor, on request only |
 | Show Log | Reveals the "Branch Review Gutters" output channel |
 
+### Marking files as seen
+
+Every file row in the Changed Files view has a checkbox. Tick it once you have
+read the file; the tally in the folder and repository rows moves with it. The
+row keeps its change-kind icon and letter badge — the checkbox carries only
+the seen bit.
+
+Folders have no checkbox, because `TreeItemCheckboxState` has no tri-state and
+a half-read folder would read as untouched and mark everything inside it on
+the first click. Folder bulk lives in the context menu instead, where the
+aggregate is spelled out: **Mark Folder as Seen** appears on an untouched or
+half-seen folder, **Mark Folder as Unseen** on a finished or half-seen one.
+
+Marks live in VS Code workspace storage, never in the working tree, and are
+**scoped to the resolved base commit**:
+
+- Resolving a **different base** clears that repository's marks — it is a
+  different diff, so marks made against the old one mean nothing.
+- If the merge base **advances** underneath you — someone merges `main` into
+  your branch overnight — the marks reset too, even though your own edits are
+  unchanged. Showing files again is the safe direction for a review tool.
+- A file **reverted** out of the change set loses its mark with it.
+
+Opening a file can mark it automatically via `reviewGutters.markSeenOnOpen`,
+which is **off by default** — with it on, preview-clicking through the tree
+marks everything it opens.
+
 ### Base detection
 
 With the selection set to `auto`, candidates are tried in order:
@@ -160,6 +191,7 @@ Selections and the on/off state are remembered per repository, per workspace.
 | `reviewGutters.explorerBadges` | `true` | Explorer badges and colours |
 | `reviewGutters.viewMode` | `"tree"` | Changed Files view grouping: `"tree"` or `"list"`. The view's title-bar toggle overrides this for the workspace |
 | `reviewGutters.autoReveal` | `true` | Reveal the current file in the Changed Files view when switching editors |
+| `reviewGutters.markSeenOnOpen` | `false` | Mark a changed file as seen as soon as it is opened |
 | `reviewGutters.maxFileSizeKB` | `1024` | Skip base versions larger than this |
 | `reviewGutters.excludeGlobs` | `[]` | Repo-relative globs never decorated, e.g. `["*.lock", "generated/**"]` |
 | `reviewGutters.logLevel` | `"info"` | Output channel verbosity |
@@ -264,6 +296,9 @@ code-review-git-diff-gutters/
 │   │   └── shadowIndex.ts     # Throwaway index snapshot (see below)
 │   ├── rendering/
 │   │   └── quickDiff.ts       # The QuickDiffProvider itself
+│   ├── review/
+│   │   ├── seenState.ts       # Pure seen/unseen model and base-commit scoping
+│   │   └── seenStore.ts       # Per-repo seen marks in workspace storage
 │   ├── tree/
 │   │   ├── changeTree.ts      # Pure tree/list builder over the change set
 │   │   └── changedFilesView.ts# Tree data provider for the Changed Files view
@@ -281,7 +316,7 @@ code-review-git-diff-gutters/
 │   └── check-index-untouched.js
 ├── docs/
 │   └── spike-rendering.md     # Why Quick Diff, with evidence
-└── PLAN.md                    # Implementation plan, M0–M5
+└── PLAN.md                    # Implementation plan, M0–M6
 ```
 
 The rendering approach is not obvious and was decided by a spike — read
@@ -306,6 +341,10 @@ the repository's own index is left byte-for-byte alone. Verify it at any time:
 npm run compile
 node scripts/check-index-untouched.js [repo-path]
 ```
+
+Seen marks add no git surface either. They are written to VS Code workspace
+storage under `reviewGutters.seen.v1`, never to the working tree and never to
+`.git`, so the whitelist and this check are unchanged by that feature.
 
 ## Building from source
 
@@ -384,6 +423,37 @@ Run against the fixture repository before each VSIX build.
     **Refresh Comparison**.
 20. Set `reviewGutters.excludeGlobs` to a glob matching a changed file → it
     disappears from the tree as well as from the Explorer.
+21. Tick a file's checkbox → it becomes seen, the folder tally and the
+    repository row (`2/7 seen · main · …`) both move, and the row keeps its
+    change-kind icon and letter badge. Untick → the counts go back down.
+22. Mark a file seen, then hit refresh in the view title: the mark survives
+    **and** the folders you had expanded are still expanded.
+23. Mark several files seen, then **Select Base Branch or Commit…** to a
+    different base → every mark in that repository is cleared. Switching back
+    does not bring them back; they were made against a different diff.
+24. Mark `src/modified.ts` seen, then restore it to its base content
+    (`git checkout <merge-base> -- src/modified.ts`). It leaves the change
+    set and its mark goes with it.
+25. **Mark Folder as Seen** on a half-seen folder marks everything under it
+    and the row's context menu flips to **Mark Folder as Unseen**; the
+    folder reads `n/n seen`. An untouched folder offers *Mark Folder as
+    Seen* only; a finished one offers *Mark Folder as Unseen* only.
+26. Mark a file seen and check its context menu still has **Open Base
+    Version**, **Compare with Base** and **Copy Path** — the `~seen` suffix
+    must not have hidden them.
+27. With `reviewGutters.markSeenOnOpen` **off**, opening files changes
+    nothing. With it **on**, opening a file marks it, but opening a *base
+    version* of a file (`Open Base Version`) does **not** mark the
+    working-tree copy.
+28. A second root that has never been on screen still reads "not loaded yet"
+    and spawns no git process. Reload the window → marks in the repositories
+    you did touch are all still there.
+29. Right-click a changed file and use **Open Base Version**, **Compare with
+    Base** and **Copy Path** — all three must actually act, not report that
+    the file is missing. A context-menu command receives the tree element,
+    not the left-click payload, and these three regressed on exactly that.
+30. Right-click a **folder** row and use **Mark Folder as Seen** — it marks
+    every file under that row, not whatever happens to be selected.
 
 ## License
 

@@ -3,7 +3,7 @@
   "displayName": "Branch Review Gutters",
   "description": "Review a branch against its merge base using editor gutter markers, without diff editors.",
   "publisher": "kidsnd274",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "icon": "assets/icon/icon.png",
   "private": true,
   "license": "UNLICENSED",
@@ -150,6 +150,30 @@
         "command": "reviewGutters.copyTreePath",
         "title": "Copy Path",
         "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.markSeen",
+        "title": "Mark as Seen",
+        "category": "Review Gutters",
+        "icon": "$(check)"
+      },
+      {
+        "command": "reviewGutters.markUnseen",
+        "title": "Mark as Unseen",
+        "category": "Review Gutters",
+        "icon": "$(close)"
+      },
+      {
+        "command": "reviewGutters.markFolderSeen",
+        "title": "Mark Folder as Seen",
+        "category": "Review Gutters",
+        "icon": "$(check)"
+      },
+      {
+        "command": "reviewGutters.markFolderUnseen",
+        "title": "Mark Folder as Unseen",
+        "category": "Review Gutters",
+        "icon": "$(close)"
       }
     ],
     "configuration": {
@@ -189,6 +213,11 @@
           "type": "boolean",
           "default": true,
           "description": "Reveal the current file in the Changed Files view when switching editors."
+        },
+        "reviewGutters.markSeenOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mark a changed file as seen as soon as it is opened. Off by default: previewing through the Changed Files view marks everything it opens."
         },
         "reviewGutters.maxFileSizeKB": {
           "type": "number",
@@ -275,6 +304,22 @@
         {
           "command": "reviewGutters.copyTreePath",
           "when": "false"
+        },
+        {
+          "command": "reviewGutters.markSeen",
+          "when": "false"
+        },
+        {
+          "command": "reviewGutters.markUnseen",
+          "when": "false"
+        },
+        {
+          "command": "reviewGutters.markFolderSeen",
+          "when": "false"
+        },
+        {
+          "command": "reviewGutters.markFolderUnseen",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -297,18 +342,38 @@
       "view/item/context": [
         {
           "command": "reviewGutters.openBaseFromTree",
-          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)$/",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)(~seen)?$/",
           "group": "reviewGutters@1"
         },
         {
           "command": "reviewGutters.compareFromTree",
-          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)$/",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)(~seen)?$/",
           "group": "reviewGutters@2"
         },
         {
           "command": "reviewGutters.copyTreePath",
-          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(added|untracked|modified|typeChanged|renamed)$/",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(added|untracked|modified|typeChanged|renamed)(~seen)?$/",
           "group": "reviewGutters@3"
+        },
+        {
+          "command": "reviewGutters.markSeen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(added|untracked|modified|typeChanged|renamed|deleted)$/",
+          "group": "reviewGutters@4"
+        },
+        {
+          "command": "reviewGutters.markUnseen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(added|untracked|modified|typeChanged|renamed|deleted)~seen$/",
+          "group": "reviewGutters@4"
+        },
+        {
+          "command": "reviewGutters.markFolderSeen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^dir($|~partial)$/",
+          "group": "reviewGutters@4"
+        },
+        {
+          "command": "reviewGutters.markFolderUnseen",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^dir~(seen|partial)$/",
+          "group": "reviewGutters@4"
         }
       ]
     }
@@ -321,7 +386,7 @@
     "icon": "./scripts/build-icon.sh",
     "package": "vsce package --no-dependencies",
     "build": "./scripts/build-vsix.sh",
-    "install-local": "code --install-extension branch-review-gutters-0.1.2.vsix --force"
+    "install-local": "code --install-extension branch-review-gutters-0.1.3.vsix --force"
   },
   "devDependencies": {
     "@types/node": "^24.5.0",

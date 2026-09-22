@@ -8,6 +8,7 @@ export interface Config {
 	explorerBadges: boolean;
 	viewMode: TreeMode;
 	autoReveal: boolean;
+	markSeenOnOpen: boolean;
 	maxFileSizeKB: number;
 	excludeGlobs: string[];
 	logLevel: LogLevel;
@@ -25,6 +26,7 @@ export function readConfig(scope?: vscode.Uri): Config {
 		explorerBadges: c.get<boolean>('explorerBadges', true),
 		viewMode: c.get<string>('viewMode', 'tree') === 'list' ? 'list' : 'tree',
 		autoReveal: c.get<boolean>('autoReveal', true),
+		markSeenOnOpen: c.get<boolean>('markSeenOnOpen', false),
 		maxFileSizeKB: Math.max(1, c.get<number>('maxFileSizeKB', 1024)),
 		excludeGlobs: Array.isArray(excludeGlobs) ? excludeGlobs.filter((g) => typeof g === 'string') : [],
 		logLevel: c.get<LogLevel>('logLevel', 'info') === 'debug' ? 'debug' : 'info',

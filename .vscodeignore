@@ -8,6 +8,7 @@ docs/**
 node_modules/**
 PLAN.md
 PLAN-changed-files-view.md
+PLAN-seen-state.md
 tsconfig.json
 .gitignore
 **/*.ts
