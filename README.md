@@ -93,7 +93,7 @@ npm run install-local
 Or install the packaged file directly:
 
 ```sh
-code --install-extension branch-review-gutters-0.1.1.vsix --force
+code --install-extension branch-review-gutters-0.1.4.vsix --force
 ```
 
 ## Usage
@@ -126,7 +126,7 @@ All are under the **Review Gutters** category in the Command Palette.
 |---|---|
 | Toggle / Enable / Disable Review Gutters | Turns markers and badges on or off for the active editor's repository |
 | Select Base Branch or Commit… | Picks a local branch, remote branch, tag, or a typed ref/SHA, then merge-base or exact mode |
-| Auto-detect Base Branch | Returns to automatic detection and reports what it found |
+| Auto-detect Base Branch | Lists the configured base branches ranked by fork point and applies the one you pick; the recommendation keeps auto-detection on |
 | Refresh Comparison | Re-resolves the baseline and reloads the change set |
 | Clear Base Selection | Back to auto-detect; leaves the on/off state alone |
 | Show Changed Files… | Focuses the Changed Files view and reveals the file you are editing. The command id is unchanged, so existing keybindings keep working |
@@ -173,14 +173,25 @@ marks everything it opens.
 
 ### Base detection
 
-With the selection set to `auto`, candidates are tried in order:
+With the selection set to `auto`, the candidates are:
 
 1. each name in `reviewGutters.baseBranches` (default `main`, `master`);
 2. each of those on the remote, e.g. `origin/main`;
 3. the remote's default branch, from `refs/remotes/<remote>/HEAD`.
 
-The first that resolves wins, and the comparison point is
-`merge-base(candidate, HEAD)`. Choosing a base manually offers two modes:
+Every candidate that exists is measured by `merge-base(candidate, HEAD)`, and
+the one `HEAD` **forked from most recently** — the fewest commits between its
+merge base and `HEAD` — wins. So a branch cut from `develop` is compared
+against `develop` rather than `master`, and a fresh `origin/master` beats a
+local `master` that has not been pulled for a while (which would otherwise
+attribute everyone else's merged work to your branch). A candidate that
+already contains `HEAD` ranks last; ties keep the configured order.
+
+*Auto-detect Base Branch* shows this ranking as a menu — each candidate with
+its commits-ahead count and fork point, the recommended one first. Taking the
+recommendation stays on `auto`; taking another pins that branch.
+
+Choosing a base manually offers two modes:
 
 - **merge base** (recommended) — only changes made on this branch since it
   diverged;
@@ -188,13 +199,22 @@ The first that resolves wins, and the comparison point is
   since divergence also show. The mode question is skipped when the chosen ref
   is already an ancestor of `HEAD`, where the two are identical.
 
+A commit sha typed by hand that is an ancestor of `HEAD` asks one question
+instead: is it the commit the branch was cut *from* (excluded, like a merge
+request diff) or the branch's *first* commit (included, by comparing against
+its parent `<sha>^`)?
+
+The comparison is always base → **working tree**, so uncommitted edits and
+untracked files show too. A merge request diff is base → pushed tip, so the
+two differ exactly by whatever has not been committed and pushed.
+
 Selections and the on/off state are remembered per repository, per workspace.
 
 ### Settings
 
 | Key | Default | Purpose |
 |---|---|---|
-| `reviewGutters.baseBranches` | `["main", "master"]` | Auto-detection candidates, in order |
+| `reviewGutters.baseBranches` | `["main", "master"]` | Auto-detection candidates; order breaks ties |
 | `reviewGutters.remote` | `"origin"` | Remote for `<remote>/<branch>` fallbacks |
 | `reviewGutters.explorerBadges` | `true` | Explorer badges and colours |
 | `reviewGutters.viewMode` | `"tree"` | Changed Files view grouping: `"tree"` or `"list"`. The view's title-bar toggle overrides this for the workspace |

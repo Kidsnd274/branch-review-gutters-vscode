@@ -1,5 +1,5 @@
 import { git, gitLine, endOfOptionsSupported } from './exec';
-import { isValidRef, revParseCommitArgs } from './args';
+import { isValidRef, revListCountArgs, revParseCommitArgs } from './args';
 
 export interface RefEntry {
 	shortName: string;
@@ -29,6 +29,24 @@ export async function headBranchName(repoRoot: string): Promise<string | undefin
 /** The merge base of two commits, or `undefined` for unrelated histories. */
 export async function mergeBase(repoRoot: string, a: string, b: string): Promise<string | undefined> {
 	return gitLine(repoRoot, ['merge-base', a, b]);
+}
+
+/** Commits reachable from `head` but not from `base`; `undefined` if git fails. */
+export async function countCommitsAhead(repoRoot: string, base: string, head: string): Promise<number | undefined> {
+	const line = await gitLine(repoRoot, revListCountArgs(base, head));
+	if (line === undefined) {
+		return undefined;
+	}
+	const n = Number.parseInt(line, 10);
+	return Number.isNaN(n) ? undefined : n;
+}
+
+/**
+ * The upstream of the current branch as a short remote-tracking name, e.g.
+ * `origin/feature`. `undefined` when detached or no upstream is configured.
+ */
+export async function headUpstream(repoRoot: string): Promise<string | undefined> {
+	return gitLine(repoRoot, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
 }
 
 export async function isAncestor(repoRoot: string, maybeAncestor: string, descendant: string): Promise<boolean> {

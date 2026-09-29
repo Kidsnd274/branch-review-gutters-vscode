@@ -35,3 +35,41 @@ export function buildAutoCandidates(input: CandidateInput): string[] {
 	}
 	return out;
 }
+
+/** A candidate that resolved and shares history with HEAD. */
+export interface RankedCandidate {
+	ref: string;
+	/** Full sha the ref points at. */
+	commit: string;
+	/** Full sha of `merge-base(ref, HEAD)`: the comparison point. */
+	mergeBase: string;
+	/** Commits on HEAD that the candidate does not have. 0 means HEAD is already in it. */
+	ahead: number;
+}
+
+/**
+ * Orders candidates by how recently HEAD forked from them: the fewest commits
+ * ahead wins, because a base that HEAD diverged from later cannot attribute
+ * someone else's already-merged work to this branch. This is what makes a
+ * fresh `origin/master` beat a stale local `master`, and `develop` beat
+ * `master` for a branch cut from `develop`.
+ *
+ * Candidates that already contain HEAD (`ahead === 0`) would produce an empty
+ * comparison, so they go last. Ties keep their configured order.
+ */
+export function rankCandidates(candidates: readonly RankedCandidate[]): RankedCandidate[] {
+	return candidates
+		.map((c, index) => ({ c, index }))
+		.sort((a, b) => {
+			const aEmpty = a.c.ahead === 0;
+			const bEmpty = b.c.ahead === 0;
+			if (aEmpty !== bEmpty) {
+				return aEmpty ? 1 : -1;
+			}
+			if (a.c.ahead !== b.c.ahead) {
+				return a.c.ahead - b.c.ahead;
+			}
+			return a.index - b.index;
+		})
+		.map(({ c }) => c);
+}

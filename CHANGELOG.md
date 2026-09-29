@@ -1,7 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.1.4
 
+- **Fixed:** auto-detection took the first configured name that existed, so a
+  local `master` that had not been pulled won over a fresh `origin/master`,
+  and `master` won over `develop` for a branch cut from `develop` — either
+  way showing other people's merged commits as yours. Candidates are now
+  measured by `merge-base` and the one `HEAD` forked from most recently wins;
+  a candidate that already contains `HEAD` ranks last.
+- *Auto-detect Base Branch* now shows that ranking as a menu — commits ahead
+  and fork point per candidate, the recommendation first — instead of applying
+  silently.
+- A commit sha typed by hand that is an ancestor of `HEAD` asks whether it is
+  the commit the branch was cut from (excluded) or the branch's first commit
+  (included, via `<sha>^`).
+- The base picker no longer lists the current branch's upstream.
+- `rev-list --count` joins the read-only git allow-list, for the ranking.
 - Seen rows now **grey out** — label, change-kind icon and letter badge — so a
   reviewed file reads as done at a glance instead of only by its tick.
 - The seen/unseen control moved off the left-hand checkbox onto the row's own

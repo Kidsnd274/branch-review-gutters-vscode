@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { Controller } from './controller';
 import type { RepoInfo } from './git/repositories';
 import type { FileChange } from './changes/parse';
-import { openChange, pickBase, showMenu } from './ui/pickers';
+import { openChange, pickAutoCandidate, pickBase, showMenu } from './ui/pickers';
 import { basenamePosix } from './util/paths';
 import { neighbourIndex } from './util/navigation';
 import * as log from './util/log';
@@ -77,7 +77,14 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 		if (!repo) {
 			return;
 		}
-		await controller.setSelection(repo, { kind: 'auto' });
+		const selection = await pickAutoCandidate(controller, repo);
+		if (!selection) {
+			return;
+		}
+		if (!controller.getState(repo).enabled) {
+			await controller.setEnabled(repo, true);
+		}
+		await controller.setSelection(repo, selection);
 		const baseline = controller.getBaseline(repo);
 		if (baseline?.baseRef && baseline.baseCommit) {
 			void vscode.window.showInformationMessage(

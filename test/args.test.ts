@@ -10,6 +10,7 @@ import {
 	isValidRef,
 	nameStatusArgs,
 	parseGitVersion,
+	revListCountArgs,
 	revParseCommitArgs,
 	supportsEndOfOptions,
 } from '../src/git/args';
@@ -18,7 +19,8 @@ const SHA = 'a'.repeat(40);
 
 test('only read-only subcommands are allowed', () => {
 	for (const sub of ALLOWED_SUBCOMMANDS) {
-		assert.doesNotThrow(() => assertAllowed(sub === 'diff' ? [sub, '--name-status'] : [sub]));
+		const args = sub === 'diff' ? [sub, '--name-status'] : sub === 'rev-list' ? [sub, '--count'] : [sub];
+		assert.doesNotThrow(() => assertAllowed(args));
 	}
 	for (const sub of ['commit', 'add', 'checkout', 'push', 'gc', 'update-index', 'status']) {
 		assert.throws(() => assertAllowed([sub]), GitPolicyError, `${sub} must be rejected`);
@@ -29,6 +31,15 @@ test('only read-only subcommands are allowed', () => {
 test('git diff is only allowed in its name-status form', () => {
 	assert.throws(() => assertAllowed(['diff', 'HEAD']), GitPolicyError);
 	assert.doesNotThrow(() => assertAllowed(['diff', '-z', '--name-status', SHA]));
+});
+
+test('git rev-list is only allowed as a count', () => {
+	assert.throws(() => assertAllowed(['rev-list', 'HEAD']), GitPolicyError);
+	const head = 'b'.repeat(40);
+	assert.deepEqual(revListCountArgs(SHA, head), ['rev-list', '--count', head, '--not', SHA]);
+	assert.doesNotThrow(() => assertAllowed(revListCountArgs(SHA, head)));
+	assert.throws(() => revListCountArgs('HEAD', head), GitPolicyError);
+	assert.throws(() => revListCountArgs(SHA, 'main'), GitPolicyError);
 });
 
 test('ref validation rejects option-looking and range input', () => {

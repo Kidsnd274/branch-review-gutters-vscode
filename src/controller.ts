@@ -1,7 +1,15 @@
 import * as vscode from 'vscode';
 import { RepositoryService, type RepoInfo } from './git/repositories';
 import { StateStore, type RepoState } from './baseline/state';
-import { resolveBaseline, sameSelection, type BaseSelection, type Baseline } from './baseline/resolver';
+import {
+	rankAutoCandidates,
+	resolveBaseline,
+	sameSelection,
+	type BaseSelection,
+	type Baseline,
+	type RankedCandidate,
+} from './baseline/resolver';
+import { headCommit } from './git/refs';
 import { loadChangeSet } from './changes/changeSet';
 import { describeCounts, totalChanges, type ChangeSet, type FileChange } from './changes/parse';
 import { BaseContentProvider } from './content/baseContentProvider';
@@ -628,6 +636,15 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 			this.renderStatusBar();
 		}
 		this.onActiveEditorChanged();
+	}
+
+	/** The auto-detection candidates for a repository, best first. Empty when HEAD is unborn. */
+	async rankAutoCandidates(repo: RepoInfo): Promise<RankedCandidate[]> {
+		const head = await headCommit(repo.rootFsPath);
+		if (!head) {
+			return [];
+		}
+		return rankAutoCandidates(repo.rootFsPath, head, this.config);
 	}
 
 	async setSelection(repo: RepoInfo, selection: BaseSelection): Promise<void> {

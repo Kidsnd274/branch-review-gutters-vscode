@@ -13,6 +13,7 @@ export const ALLOWED_SUBCOMMANDS = [
 	'cat-file',
 	'diff',
 	'ls-files',
+	'rev-list',
 ] as const;
 
 export type AllowedSubcommand = (typeof ALLOWED_SUBCOMMANDS)[number];
@@ -33,6 +34,9 @@ export function assertAllowed(args: readonly string[]): void {
 	}
 	if (sub === 'diff' && !args.includes('--name-status')) {
 		throw new GitPolicyError('git diff is only allowed with --name-status');
+	}
+	if (sub === 'rev-list' && !args.includes('--count')) {
+		throw new GitPolicyError('git rev-list is only allowed with --count');
 	}
 }
 
@@ -118,6 +122,18 @@ export function nameStatusArgs(baseCommit: string, endOfOptions: boolean): strin
 	}
 	args.push(baseCommit, '--');
 	return args;
+}
+
+/**
+ * Builds `rev-list --count <head> --not <base>`: the number of commits reachable
+ * from `head` but not from `base`. Both must already be full shas so the
+ * arguments cannot be read as options or revision ranges.
+ */
+export function revListCountArgs(baseCommit: string, headCommit: string): string[] {
+	if (!isFullSha(baseCommit) || !isFullSha(headCommit)) {
+		throw new GitPolicyError(`expected full shas, got: ${baseCommit}, ${headCommit}`);
+	}
+	return ['rev-list', '--count', headCommit, '--not', baseCommit];
 }
 
 /** Builds the `<commit>:<path>` spec for cat-file, rejecting traversal. */
