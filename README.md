@@ -63,6 +63,16 @@ what your branch did to it, with every language feature intact.
   read it and work down a long change set without losing your place, the same
   idea as GitHub's "Viewed" tick. A seen row greys out, folders carry their
   own tally, and the repository row reads `3/12 seen · main · 8 M, 2 A, 1 D`.
+- **Deleted code, without leaving the editor** — a faint red label such as
+  `− 3 lines deleted` at the end of each line where the branch removed or
+  replaced code. Hover the label to read the removed lines.
+- **Inline diff mode** — a title-bar toggle in the Changed Files view switches
+  between opening files in the normal editor and opening them as an inline
+  diff, with deleted lines as full red rows. The working-tree side of the diff
+  is the real file, so Go to Definition and Find References keep working.
+- **Deleted files painted red** — a file the branch deleted opens as its base
+  version, red from top to bottom, with a banner above line 1 and a *Mark as
+  Seen* action.
 - **Changed-file navigation** — next/previous changed file and next/previous
   change within a file, and the view follows the active editor as you switch.
 - **Live** — unsaved edits show up immediately, and checking out another
@@ -134,6 +144,8 @@ All are under the **Review Gutters** category in the Command Palette.
 | Next / Previous Change in File | Delegates to VS Code's `editor.action.dirtydiff.next` / `.previous` |
 | Open Base Version of Current File | Opens the file as it is at the base, read-only |
 | Compare Current File with Base | Opens a normal diff editor, on request only |
+| Open Current File as Inline Diff | Opens base ↔ working tree as a diff, offering once a session to switch VS Code's diffs to inline view. Also the diff button in the editor title bar of a modified or renamed file, and *Open as Inline Diff* on a Changed Files row's right-click menu |
+| Open Changed Files as Inline Diffs / in the Editor | Switches what clicking a file in the Changed Files view opens; also the view's title-bar toggle |
 | Show Log | Reveals the "Branch Review Gutters" output channel |
 
 ### Marking files as seen
@@ -170,6 +182,40 @@ Marks live in VS Code workspace storage, never in the working tree, and are
 Opening a file can mark it automatically via `reviewGutters.markSeenOnOpen`,
 which is **off by default** — with it on, preview-clicking through the tree
 marks everything it opens.
+
+### Reviewing deleted code
+
+A big refactor is mostly deletions, and the gutter alone only shows a small
+red triangle where lines went. There are two ways to read what was removed,
+switched by the diff / file icon in the Changed Files view's title bar:
+
+- **Editor mode** (default). Files open in the normal editor. Wherever the
+  branch deleted or replaced lines, a faint red label sits at the end of the
+  line — `− 3 lines deleted` after the line the block used to follow, or
+  `− 3 lines replaced` on the first line of the new code. Hover the label to
+  see the old lines (and what replaced them) as a red/green diff, with a link
+  to open the file as an inline diff. Turn the labels off with
+  `reviewGutters.deletedLineHints`.
+- **Inline diff mode**. Modified and renamed files open as a diff against the
+  base, read inline: deleted lines are full red rows between the current ones.
+  The whole file is shown; the diff editor's *Collapse Unchanged Regions*
+  button hides the unchanged parts if you want something closer to a pull
+  request. Added files have nothing removed, so they still open normally.
+
+  VS Code has no way to open a single diff inline — inline versus side by side
+  is the `diffEditor.renderSideBySide` user setting, shared by every diff
+  editor. The first time this mode opens a diff in a session, it asks before
+  changing that setting, and leaves it alone if you decline.
+
+Deleted lines are drawn by VS Code, not typed into the file, so you cannot put
+the cursor on one: Go to Definition and Find References work on code that
+still exists, not on code that was removed.
+
+**Deleted files** open the same way in both modes: as the file at the base,
+read-only, painted red, with a `Deleted on this branch` banner and a *Mark as
+Seen* action above line 1. Language features in a deleted file are limited,
+because it exists only in git and the language server sees it as a loose
+file.
 
 ### Base detection
 
@@ -220,6 +266,8 @@ Selections and the on/off state are remembered per repository, per workspace.
 | `reviewGutters.viewMode` | `"tree"` | Changed Files view grouping: `"tree"` or `"list"`. The view's title-bar toggle overrides this for the workspace |
 | `reviewGutters.autoReveal` | `true` | Reveal the current file in the Changed Files view when switching editors |
 | `reviewGutters.markSeenOnOpen` | `false` | Mark a changed file as seen as soon as it is opened |
+| `reviewGutters.openMode` | `"editor"` | What clicking a changed file opens: `"editor"` or `"inlineDiff"`. The view's title-bar toggle overrides this for the workspace |
+| `reviewGutters.deletedLineHints` | `true` | Labels at the end of lines where code was deleted or replaced, with the removed lines on hover |
 | `reviewGutters.maxFileSizeKB` | `1024` | Skip base versions larger than this |
 | `reviewGutters.excludeGlobs` | `[]` | Repo-relative globs never decorated, e.g. `["*.lock", "generated/**"]` |
 | `reviewGutters.logLevel` | `"info"` | Output channel verbosity |
@@ -243,6 +291,12 @@ Selections and the on/off state are remembered per repository, per workspace.
   false ones. The status bar tooltip counts them.
 - **Deleted files** have no Explorer node; they appear in the Changed Files
   view and open read-only at the base version.
+- **Deleted-line labels** come from the extension's own line diff, run in
+  the extension host. It honours the same whitespace setting as the gutter,
+  but on an ambiguous edit it can group lines slightly differently from VS
+  Code's diff, so a label may sit a line away from the gutter triangle. Past
+  about 1000 changed lines in one file, the changed middle of the file is
+  reported as a single replacement.
 - **Untracked files** are marked `U` and shown as entirely added.
 - The right-hand side of the comparison is always the **live buffer**, so
   uncommitted edits are included. There is no "committed changes only" mode.
@@ -308,6 +362,8 @@ code-review-git-diff-gutters/
 │   │   └── state.ts           # Per-repo persistence in workspace state
 │   ├── changes/
 │   │   ├── changeSet.ts       # The set of files differing from the base
+│   │   ├── deletionHints.ts   # Labels and hover text for removed lines (pure)
+│   │   ├── lineDiff.ts        # Myers line diff for those labels (pure)
 │   │   ├── parse.ts           # diff --name-status / ls-files parsing
 │   │   └── style.ts           # kind → badge, colour, codicon, label (shared)
 │   ├── content/
@@ -323,6 +379,8 @@ code-review-git-diff-gutters/
 │   │   ├── repositories.ts    # Git extension API, with standalone fallback
 │   │   └── shadowIndex.ts     # Throwaway index snapshot (see below)
 │   ├── rendering/
+│   │   ├── deletedFiles.ts    # Red base view and banner for deleted files
+│   │   ├── deletedLines.ts    # End-of-line deleted-line labels and hovers
 │   │   └── quickDiff.ts       # The QuickDiffProvider itself
 │   ├── review/
 │   │   ├── seenState.ts       # Pure seen/unseen model and base-commit scoping
@@ -332,6 +390,7 @@ code-review-git-diff-gutters/
 │   │   ├── changeTree.ts      # Pure tree/list builder over the change set
 │   │   └── changedFilesView.ts# Tree data provider for the Changed Files view
 │   ├── ui/
+│   │   ├── inlineDiff.ts      # Opens base ↔ working tree diffs, asks about inline view
 │   │   ├── pickers.ts         # Base picker and the status-bar menu
 │   │   ├── statusBar.ts       # Status bar item
 │   │   └── statusText.ts      # Label and tooltip formatting (unit-tested)
@@ -498,6 +557,22 @@ Run against the fixture repository before each VSIX build.
     still live, hover a *different* row and click its tick action → only the
     hovered row is marked. An inline action does not move the selection, so
     it must not act on it.
+34. In editor mode, open `src/modified.ts` after deleting a block of lines
+    from it on the branch: a faint red `− n lines deleted` label sits at the
+    end of the line above the gap. Hover the label → the removed lines show as
+    a red diff block, and *Open as inline diff* opens the diff. Hovering code
+    elsewhere on that line shows only the language's own hover.
+35. Type in that file: the labels follow the edits and settle within a
+    second. Undo back to the saved text and they match the gutter again.
+36. Toggle the Changed Files title-bar icon to inline diff mode. With
+    `diffEditor.renderSideBySide` on, clicking a modified file opens its diff
+    and asks once whether to switch to inline view; *Use Inline View* turns
+    the open diff inline. Clicking an added file opens the normal editor. No
+    end-of-line labels are drawn inside the diff.
+37. In either mode, click a **deleted** file: it opens red from the first to
+    the last line, with the `Deleted on this branch` banner and a *Mark as
+    Seen* action that marks the row in the tree and flips to *Mark as
+    Unseen*. *Open Base Version* of a file that still exists is **not** red.
 
 ## License
 

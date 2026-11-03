@@ -1,0 +1,348 @@
+<title>Reviewing Deleted Code</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+/* Layout: one reading column of option sections, each pairing a mock editor with what it gets you; summary table at the end. */
+:root {
+  --bg: #f4f6f9; --surface: #ffffff; --fg: #1a2230; --muted: #5a6575; --line: #dbe1ea; --accent: #2d58cc;
+  --ed-bg: #fbfcfe; --ed-chrome: #eef1f5; --ed-fg: #1f2733; --ed-ln: #98a2ae;
+  --del-bg: #ffe6e5; --del-strong: #ffc8c5; --del-fg: #b3261e;
+  --add-bg: #e1f5e7; --add-fg: #19803a;
+  --kw: #7c3aed; --str: #0b4f8a; --type: #a5520b;
+  --ok: #19803a; --no: #b3261e; --part: #9a6a00;
+  --shadow: 0 6px 24px rgba(20, 30, 50, .14);
+  --f-body: "IBM Plex Sans", system-ui, sans-serif;
+  --f-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --row: 22px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #10141a; --surface: #161b23; --fg: #e3e8ef; --muted: #98a3b1; --line: #29313d; --accent: #82a6ff;
+  --ed-bg: #0d1116; --ed-chrome: #1a2029; --ed-fg: #d5dce5; --ed-ln: #5b6572;
+  --del-bg: #3a1b1e; --del-strong: #5b2529; --del-fg: #ff9189;
+  --add-bg: #14301f; --add-fg: #6cd28c;
+  --kw: #c4a1ff; --str: #9ccbff; --type: #e6b36d;
+  --ok: #6cd28c; --no: #ff9189; --part: #e6c15c;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #10141a; --surface: #161b23; --fg: #e3e8ef; --muted: #98a3b1; --line: #29313d; --accent: #82a6ff;
+  --ed-bg: #0d1116; --ed-chrome: #1a2029; --ed-fg: #d5dce5; --ed-ln: #5b6572;
+  --del-bg: #3a1b1e; --del-strong: #5b2529; --del-fg: #ff9189;
+  --add-bg: #14301f; --add-fg: #6cd28c;
+  --kw: #c4a1ff; --str: #9ccbff; --type: #e6b36d;
+  --ok: #6cd28c; --no: #ff9189; --part: #e6c15c;
+  --shadow: 0 6px 24px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--f-body); }
+.wrap { max-width: 920px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 48px; }
+h1, h2 { font-family: var(--f-head); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: 2rem; }
+h2 { font-size: 1.4rem; }
+p { margin: 0; max-width: 68ch; }
+code.i { font-family: var(--f-mono); font-size: .88em; background: var(--ed-chrome); padding: 1px 5px; border-radius: 4px; }
+.lede { display: grid; gap: 12px; }
+.lede p { color: var(--muted); }
+.goal { display: flex; flex-wrap: wrap; gap: 8px; }
+.goal span { font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--muted); }
+
+section.opt { display: grid; gap: 16px; }
+.opt header { display: grid; gap: 6px; }
+.tag { font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.tag.rec { color: var(--accent); }
+.opt header p { color: var(--muted); }
+
+/* mock editor */
+.ed { background: var(--ed-bg); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; color: var(--ed-fg); }
+.tabs { display: flex; align-items: center; gap: 10px; background: var(--ed-chrome); border-bottom: 1px solid var(--line); padding: 7px 12px; font-size: .82rem; color: var(--muted); }
+.tabs b { color: var(--ed-fg); font-weight: 500; }
+.tabs .pill { margin-left: auto; font-size: .72rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
+.scroll { overflow-x: auto; position: relative; }
+.code { font: 13px/var(--row) var(--f-mono); min-width: max-content; padding-block: 6px; position: relative; }
+.r { display: flex; height: var(--row); white-space: pre; }
+.r .n { width: 3.2ch; text-align: right; color: var(--ed-ln); padding-right: 1ch; flex: none; user-select: none; }
+.r .m { width: 2.2ch; text-align: center; flex: none; user-select: none; }
+.r .t { padding-right: 24px; }
+.r.del { background: var(--del-bg); } .r.del .m { color: var(--del-fg); }
+.r.add { background: var(--add-bg); } .r.add .m { color: var(--add-fg); }
+.r.gm-add .m { box-shadow: inset 3px 0 0 var(--add-fg); }
+.r.gm-del .m { position: relative; }
+.r.gm-del .m::after { content: ""; position: absolute; left: 0; bottom: -4px; border: 4px solid transparent; border-left: 6px solid var(--del-fg); z-index: 1; }
+.r.sep { color: var(--ed-ln); font-style: italic; }
+.kw { color: var(--kw); } .str { color: var(--str); } .ty { color: var(--type); }
+.ghost { color: var(--del-fg); opacity: .7; font-style: italic; }
+.banner { background: var(--del-bg); color: var(--del-fg); font-size: .82rem; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+
+.hover { position: absolute; left: 7ch; top: calc(var(--row) * 5 + 10px); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); padding: 6px 0; z-index: 2; }
+.hover .h { font: 12px var(--f-body); color: var(--muted); padding: 0 10px 4px; }
+.hover .r { padding-right: 10px; }
+
+/* multi-file */
+.file + .file { border-top: 1px solid var(--line); }
+.fh { display: flex; align-items: center; gap: 10px; padding: 6px 12px; font: 12.5px var(--f-mono); background: var(--ed-chrome); border-bottom: 1px solid var(--line); }
+.fh .k { font: 600 11px var(--f-body); letter-spacing: .05em; text-transform: uppercase; border-radius: 3px; padding: 0 5px; }
+.k.D { color: var(--del-fg); background: var(--del-bg); } .k.M { color: var(--accent); border: 1px solid var(--line); } .k.A { color: var(--add-fg); background: var(--add-bg); }
+.fh .c { margin-left: auto; font-family: var(--f-body); color: var(--muted); }
+.fh .c .p { color: var(--add-fg); } .fh .c .x { color: var(--del-fg); }
+
+/* what you get */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 24px; }
+.facts ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.facts li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; font-size: .92rem; }
+.facts li::before { font-weight: 600; }
+.facts li.y::before { content: "✓"; color: var(--ok); }
+.facts li.n::before { content: "✕"; color: var(--no); }
+.facts li.p::before { content: "~"; color: var(--part); }
+.facts h3 { font: 600 .75rem var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+
+/* summary */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .9rem; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td.y { color: var(--ok); } td.n { color: var(--no); } td.p { color: var(--part); }
+.rec-box { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 20px; display: grid; gap: 10px; }
+.rec-box ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; max-width: 70ch; }
+</style>
+
+<div class="wrap">
+  <div class="lede">
+    <span class="tag">Branch Review Gutters · design options</span>
+    <h1>Reviewing deleted code in the editor</h1>
+    <p>You want a GitHub-style review of the branch, but done in VS Code so you can Ctrl+click, Find References and Find Implementations while you read. Your refactor deletes a lot, so the deleted lines and deleted files need to be visible too. Below, each option is mocked on the same example change: <code class="i">notify()</code> stops calling <code class="i">SmsClient</code> directly and goes through a new <code class="i">ChannelRouter</code>, and <code class="i">src/sms/client.ts</code> is deleted.</p>
+    <div class="goal"><span>Deleted lines visible</span><span>Deleted files reviewable</span><span>Go to Definition / References</span><span>Whole branch, file by file</span></div>
+  </div>
+
+  <section class="opt">
+    <header>
+      <span class="tag rec">Option A · closest to GitHub's "Files changed"</span>
+      <h2>Branch changes in one scrolling tab</h2>
+      <p>VS Code has a built-in multi-file diff editor (the one Source Control uses for "View Changes"). The extension can open it with every file from your branch compared against the base, using the <code class="i">vscode.changes</code> command. Each file is a real inline diff editor stacked one after another, and deleted files appear as all-red sections.</p>
+    </header>
+    <div class="ed">
+      <div class="tabs"><b>Branch changes vs main</b><span>14 files</span><span class="pill">multi-diff</span></div>
+      <div class="scroll"><div class="code" id="mockA"></div></div>
+    </div>
+    <div class="facts">
+      <div><h3>Works well</h3><ul>
+        <li class="y">Deleted lines are full red rows, added lines green, like GitHub.</li>
+        <li class="y">Deleted files show in the same scroll, so nothing is hidden.</li>
+        <li class="y">Ctrl+click, Find References and Find Implementations work on new and unchanged code, because that side is your real file.</li>
+        <li class="y">Small to build: the extension already knows the change set and base URIs.</li>
+      </ul></div>
+      <div><h3>Limits</h3><ul>
+        <li class="n">You can't put the cursor on a red line, so you can't Ctrl+click a deleted call.</li>
+        <li class="p">It's a diff tab, not your normal editor. Opening a definition jumps to a normal tab.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section class="opt">
+    <header>
+      <span class="tag">Option B · one file at a time</span>
+      <h2>Inline diff for the current file</h2>
+      <p>The same view as A, but for one file. "Compare with Base" already opens a side-by-side diff. A new "Compare with Base (Inline)" command would open it as a single column. You can still type in it.</p>
+    </header>
+    <div class="ed">
+      <div class="tabs"><b>notify.ts</b><span>(base ↔ working tree)</span><span class="pill">inline</span></div>
+      <div class="scroll"><div class="code" id="mockB"></div></div>
+    </div>
+    <div class="facts">
+      <div><h3>Works well</h3><ul>
+        <li class="y">Same full red and green rows as A.</li>
+        <li class="y">Full IDE features on the code that exists now.</li>
+        <li class="y">You can edit the file while reviewing it.</li>
+      </ul></div>
+      <div><h3>Limits</h3><ul>
+        <li class="n">Red lines can't be clicked into, same as A.</li>
+        <li class="p">VS Code has no option to open one diff inline. The command has to switch the <code class="i">diffEditor.renderSideBySide</code> setting, which also changes your other diffs.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section class="opt">
+    <header>
+      <span class="tag">Option C · for deleted files</span>
+      <h2>Deleted file, shown red from top to bottom</h2>
+      <p>Opening a deleted file from the Changed Files view already shows its base version. This option adds a banner and paints every line red so you can't mistake it for live code. This works because the extension can colour lines that exist, and here every line exists in the base version.</p>
+    </header>
+    <div class="ed">
+      <div class="tabs"><b>client.ts</b><span>src/sms · base version</span><span class="pill">read-only</span></div>
+      <div class="banner">Deleted on this branch. You're viewing it as it was at main (a1c9e04).</div>
+      <div class="scroll"><div class="code" id="mockC"></div></div>
+    </div>
+    <div class="facts">
+      <div><h3>Works well</h3><ul>
+        <li class="y">Read the whole deleted file with normal syntax colours, search and selection.</li>
+        <li class="y">Mark it seen like any other file.</li>
+      </ul></div>
+      <div><h3>Limits</h3><ul>
+        <li class="p">Go to Definition is limited. The file only exists in git, so the language server treats it as a loose file. Jumps within the file usually work; jumps into other files depend on the language.</li>
+        <li class="n">Find References won't find callers of the deleted code, because those calls are deleted too. Option A shows where they went.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section class="opt">
+    <header>
+      <span class="tag">Option D · stay in the normal editor</span>
+      <h2>Hover to see what was removed</h2>
+      <p>Your normal editor, with a red marker in the gutter between lines where code was removed. Hovering it shows the removed lines.</p>
+    </header>
+    <div class="ed">
+      <div class="tabs"><b>notify.ts</b><span>src</span></div>
+      <div class="scroll"><div class="code" id="mockD"></div></div>
+    </div>
+    <div class="facts">
+      <div><h3>Works well</h3><ul>
+        <li class="y">Every IDE feature works, since this is the normal editor.</li>
+        <li class="y">The file doesn't move around while you edit.</li>
+      </ul></div>
+      <div><h3>Limits</h3><ul>
+        <li class="n">You only see deleted lines if you hover. Easy to miss in a big refactor.</li>
+        <li class="p">Not much better than the click-to-peek you already have from the gutter markers.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section class="opt">
+    <header>
+      <span class="tag">Option E · stay in the normal editor</span>
+      <h2>Faint note at the end of the line</h2>
+      <p>Same normal editor, with faded red text after the line where the removal happened, so you notice it without hovering. It can only show one line.</p>
+    </header>
+    <div class="ed">
+      <div class="tabs"><b>notify.ts</b><span>src</span></div>
+      <div class="scroll"><div class="code" id="mockE"></div></div>
+    </div>
+    <div class="facts">
+      <div><h3>Works well</h3><ul>
+        <li class="y">Always visible, every IDE feature still works.</li>
+      </ul></div>
+      <div><h3>Limits</h3><ul>
+        <li class="n">Only a one-line summary. You still need hover or a diff to read the removed code.</li>
+        <li class="p">Gets noisy in files where most lines changed.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section class="opt">
+    <header><h2>Side by side</h2></header>
+    <div class="tbl"><table>
+      <thead><tr><th>Option</th><th>Deleted lines as red rows</th><th>Deleted files</th><th>IDE features on current code</th><th>Normal editor</th><th>Work</th></tr></thead>
+      <tbody>
+        <tr><td>A · Branch changes tab</td><td class="y">Yes</td><td class="y">Yes, inline</td><td class="y">Full</td><td class="n">No, diff tab</td><td>Small</td></tr>
+        <tr><td>B · Inline diff</td><td class="y">Yes</td><td class="n">No</td><td class="y">Full</td><td class="n">No, diff tab</td><td>Small</td></tr>
+        <tr><td>C · Red deleted file</td><td class="y">Whole file</td><td class="y">Yes</td><td class="p">Limited</td><td class="p">Read-only tab</td><td>Small</td></tr>
+        <tr><td>D · Hover</td><td class="n">In a popup</td><td class="n">No</td><td class="y">Full</td><td class="y">Yes</td><td>Medium</td></tr>
+        <tr><td>E · Line note</td><td class="n">One-line summary</td><td class="n">No</td><td class="y">Full</td><td class="y">Yes</td><td>Medium</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <div class="rec-box">
+    <h2>Suggested combination</h2>
+    <ol>
+      <li><b>A</b> as the main review mode: one command, "Review Branch Changes", opens every changed file in one scrolling tab, deleted files included.</li>
+      <li><b>B</b> for when you're in a single file and want its deleted lines without opening the whole branch.</li>
+      <li><b>C</b> so a deleted file opened from the Changed Files view is unmistakably deleted.</li>
+    </ol>
+    <p>D and E are possible later, but they don't show deleted code as clearly as A and B.</p>
+  </div>
+</div>
+
+<script>
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const hl = (s) => esc(s).replace(/('[^']*')|\b(import|from|export|async|function|const|return|new|await|class|private|readonly|constructor|throw|if)\b|\b([A-Z][A-Za-z]+)\b/g,
+  (m, str, kw, ty) => str ? `<span class="str">${str}</span>` : kw ? `<span class="kw">${kw}</span>` : `<span class="ty">${ty}</span>`);
+
+// row: [kind, oldNo, newNo, text, extraHtml?]   kind: " " | "-" | "+" | "…"
+function rows(list, { two = true, cls = {} } = {}) {
+  return list.map(([k, o, n, t, extra], i) => {
+    if (k === "…") return `<div class="r sep"><span class="n"></span>${two ? '<span class="n"></span>' : ""}<span class="m"></span><span class="t">${esc(t)}</span></div>`;
+    const kind = k === "-" ? "del" : k === "+" ? "add" : "";
+    const nums = two ? `<span class="n">${o ?? ""}</span><span class="n">${n ?? ""}</span>` : `<span class="n">${n ?? o ?? ""}</span>`;
+    const mark = k === "-" ? "−" : k === "+" ? "+" : "";
+    return `<div class="r ${kind} ${cls[i] ?? ""}">${nums}<span class="m">${mark}</span><span class="t">${hl(t)}${extra ?? ""}</span></div>`;
+  }).join("");
+}
+
+const notifyDiff = [
+  ["-", 1, null, "import { SmsClient } from './sms/client';"],
+  ["-", 2, null, "import { retry } from './util/retry';"],
+  ["+", null, 1, "import { ChannelRouter } from './channels/router';"],
+  [" ", 3, 2, ""],
+  [" ", 4, 3, "export async function notify(user: User, text: string) {"],
+  ["-", 5, null, "  const client = new SmsClient(config.sms);"],
+  ["-", 6, null, "  const phone = normalizePhone(user.phone);"],
+  ["-", 7, null, "  return retry(() => client.send(phone, text), 3);"],
+  ["+", null, 4, "  const channel = ChannelRouter.pick(user);"],
+  ["+", null, 5, "  return channel.deliver(user, text);"],
+  [" ", 8, 6, "}"],
+];
+
+const fileHead = (kind, path, add, del) =>
+  `<div class="fh"><span class="k ${kind}">${{ D: "Deleted", M: "Modified", A: "Added" }[kind]}</span><span>${path}</span><span class="c"><span class="p">+${add}</span> <span class="x">−${del}</span></span></div>`;
+
+document.getElementById("mockA").innerHTML =
+  `<div class="file">${fileHead("M", "src/notify.ts", 3, 5)}${rows(notifyDiff)}</div>` +
+  `<div class="file">${fileHead("D", "src/sms/client.ts", 0, 42)}${rows([
+    ["-", 1, null, "import { HttpPool } from '../net/pool';"],
+    ["-", 2, null, ""],
+    ["-", 3, null, "export class SmsClient {"],
+    ["-", 4, null, "  constructor(private readonly cfg: SmsConfig) {}"],
+    ["…", null, null, "  ⋯ 38 more deleted lines"],
+  ])}</div>` +
+  `<div class="file">${fileHead("A", "src/channels/router.ts", 27, 0)}${rows([
+    ["+", null, 1, "import { SmsChannel } from './sms';"],
+    ["+", null, 2, "import { PushChannel } from './push';"],
+    ["…", null, null, "  ⋯ 25 more added lines"],
+  ])}</div>`;
+
+document.getElementById("mockB").innerHTML = rows(notifyDiff);
+
+document.getElementById("mockC").innerHTML = rows([
+  "import { HttpPool } from '../net/pool';",
+  "",
+  "export class SmsClient {",
+  "  private readonly pool = new HttpPool(4);",
+  "",
+  "  constructor(private readonly cfg: SmsConfig) {}",
+  "",
+  "  async send(phone: string, body: string) {",
+  "    if (!phone) throw new Error('phone required');",
+  "    return this.pool.post(this.cfg.url, { phone, body });",
+  "  }",
+].map((t, i) => ["-", i + 1, null, t]), { two: false }).replace(/<span class="m">−<\/span>/g, '<span class="m"></span>');
+
+const current = [
+  [" ", null, 1, "import { ChannelRouter } from './channels/router';"],
+  [" ", null, 2, ""],
+  [" ", null, 3, "export async function notify(user: User, text: string) {"],
+  [" ", null, 4, "  const channel = ChannelRouter.pick(user);"],
+  [" ", null, 5, "  return channel.deliver(user, text);"],
+  [" ", null, 6, "}"],
+  [" ", null, 7, ""],
+  [" ", null, 8, ""],
+];
+document.getElementById("mockD").innerHTML =
+  rows(current, { two: false, cls: { 0: "gm-add gm-del", 2: "gm-del", 3: "gm-add", 4: "gm-add" } }) +
+  `<div class="hover"><div class="h">3 lines removed here</div>${rows([
+    ["-", 5, null, "  const client = new SmsClient(config.sms);"],
+    ["-", 6, null, "  const phone = normalizePhone(user.phone);"],
+    ["-", 7, null, "  return retry(() => client.send(phone, text), 3);"],
+  ], { two: false })}</div>`;
+
+const ghost = (s) => `<span class="ghost">    ${esc(s)}</span>`;
+const withGhost = current.slice(0, 6).map((r) => r.slice());
+withGhost[0][4] = ghost("⌫ 2 lines removed · import { SmsClient } …");
+withGhost[2][4] = ghost("⌫ 3 lines removed · const client = new SmsClient(…");
+document.getElementById("mockE").innerHTML =
+  rows(withGhost, { two: false, cls: { 0: "gm-add gm-del", 2: "gm-del", 3: "gm-add", 4: "gm-add" } });
+</script>

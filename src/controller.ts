@@ -11,9 +11,12 @@ import {
 } from './baseline/resolver';
 import { headCommit } from './git/refs';
 import { loadChangeSet } from './changes/changeSet';
-import { describeCounts, totalChanges, type ChangeSet, type FileChange } from './changes/parse';
+import { describeCounts, hasBothSides, totalChanges, type ChangeSet, type FileChange } from './changes/parse';
 import { BaseContentProvider } from './content/baseContentProvider';
 import { QuickDiffRenderer, type RenderHost } from './rendering/quickDiff';
+import { DeletedLinesRenderer, type DeletedLinesHost } from './rendering/deletedLines';
+import { DeletedFilesRenderer, type DeletedFilesHost } from './rendering/deletedFiles';
+import type { BasePayload } from './content/uri';
 import { isRenderableBaseline } from './baseline/selection';
 import { ReviewFileDecorationProvider } from './explorer/fileDecorations';
 import { ChangedFilesView, VIEW_ID, type TreeHost } from './tree/changedFilesView';
@@ -21,7 +24,7 @@ import { type TreeMode, visibleChanges } from './tree/changeTree';
 import { SeenStore } from './review/seenStore';
 import * as seenState from './review/seenState';
 import { StatusBar } from './ui/statusBar';
-import { readConfig, CONFIG_SECTION, type Config } from './config';
+import { readConfig, CONFIG_SECTION, type Config, type OpenMode } from './config';
 import { isDotGitPath, makeGlobMatcher } from './util/paths';
 import { debounce, type Debounced } from './util/debounce';
 import { probeVersion, endOfOptionsSupported } from './git/exec';
@@ -40,7 +43,7 @@ interface RepoRuntime {
 
 const FOCUS_REFRESH_MS = 5000;
 
-export class Controller implements RenderHost, TreeHost, vscode.Disposable {
+export class Controller implements RenderHost, TreeHost, DeletedLinesHost, DeletedFilesHost, vscode.Disposable {
 	private readonly runtimes = new Map<string, RepoRuntime>();
 	private readonly disposables: vscode.Disposable[] = [];
 	private config: Config;
@@ -48,6 +51,7 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 	private lastFocusRefresh = 0;
 	private oldGitWarned = false;
 	private viewModeValue: TreeMode;
+	private openModeValue: OpenMode;
 	private readonly treeRefresh: Debounced;
 	private readonly changeSetsChangedEmitter = new vscode.EventEmitter<void>();
 
@@ -56,6 +60,8 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 
 	readonly content: BaseContentProvider;
 	private readonly renderer: QuickDiffRenderer;
+	private readonly deletedLines: DeletedLinesRenderer;
+	private readonly deletedFiles: DeletedFilesRenderer;
 	private readonly decorations: ReviewFileDecorationProvider;
 	private readonly view: ChangedFilesView;
 	private readonly statusBar: StatusBar;
@@ -69,9 +75,12 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		this.isExcludedPath = makeGlobMatcher(this.config.excludeGlobs);
 		log.setLogLevel(this.config.logLevel);
 		this.viewModeValue = this.store.getViewMode() ?? this.config.viewMode;
+		this.openModeValue = this.store.getOpenMode() ?? this.config.openMode;
 
 		this.content = new BaseContentProvider(() => this.config);
 		this.renderer = new QuickDiffRenderer(this, this.content);
+		this.deletedLines = new DeletedLinesRenderer(this, this.content);
+		this.deletedFiles = new DeletedFilesRenderer(this);
 		this.decorations = new ReviewFileDecorationProvider(this);
 		this.decorations.setEnabled(this.config.explorerBadges);
 		this.view = new ChangedFilesView(this);
@@ -81,6 +90,8 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		this.disposables.push(
 			this.content,
 			this.renderer,
+			this.deletedLines,
+			this.deletedFiles,
 			this.decorations,
 			this.view,
 			this.statusBar,
@@ -196,6 +207,14 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		return JSON.stringify([this.config.excludeGlobs, this.config.maxFileSizeKB]);
 	}
 
+	basePayloadFor(repo: RepoInfo, uri: vscode.Uri): Promise<BasePayload | undefined> {
+		return this.renderer.basePayloadFor(repo, uri);
+	}
+
+	deletedLineHintsEnabled(): boolean {
+		return this.config.deletedLineHints;
+	}
+
 	isTouched(repo: RepoInfo): boolean {
 		return this.runtimes.get(repo.rootFsPath)?.touched === true;
 	}
@@ -245,6 +264,7 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 					return;
 				}
 				this.view.invalidateSeen(root, relPaths);
+				this.deletedFiles.refresh();
 				this.updateSeenContextKeys();
 			})
 			.catch((err) => log.error(`could not save the seen state for ${root}`, err));
@@ -278,6 +298,24 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		return true;
 	}
 
+	/**
+	 * Whether the active editor shows a changed file that has a base version, so
+	 * the editor title can offer "Open as Inline Diff". Read from the change set
+	 * alone; the command itself reports a base version that turns out to be
+	 * binary or too large.
+	 */
+	private updateActiveFileContext(): void {
+		const uri = vscode.window.activeTextEditor?.document.uri;
+		const repo = uri?.scheme === 'file' ? this.repositories.getRepositoryFor(uri) : undefined;
+		const rel = repo && uri ? this.repositories.relativePath(repo, uri) : undefined;
+		const change = repo && rel && this.isEnabled(repo) && !this.isExcluded(rel) ? this.getChangeSet(repo)?.byPath.get(rel) : undefined;
+		void vscode.commands.executeCommand(
+			'setContext',
+			'reviewGutters.activeFileDiffable',
+			Boolean(change && hasBothSides(change.kind) && this.getBaseline(repo!)?.baseCommit),
+		);
+	}
+
 	private updateSeenContextKeys(): void {
 		let seen = 0;
 		let total = 0;
@@ -298,6 +336,9 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 	/** Repaints everything that reads a change set, and tells listeners. */
 	private notifyChangeSetsChanged(): void {
 		this.decorations.refresh();
+		this.deletedLines.refreshAll();
+		this.deletedFiles.refresh();
+		this.updateActiveFileContext();
 		// The seen tally is a function of the change set and the base, so a
 		// refresh moves it even though no mark was made — a base that advanced
 		// overnight invalidates every mark in the repository.
@@ -379,7 +420,9 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		// Visible changes, not raw counts: a change set whose every file is
 		// excluded would otherwise leave the view empty with no welcome state.
 		void vscode.commands.executeCommand('setContext', 'reviewGutters.hasChanges', this.hasVisibleChanges(repo));
+		this.updateActiveFileContext();
 		void vscode.commands.executeCommand('setContext', 'reviewGutters.viewMode', this.viewModeValue);
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.openMode', this.openModeValue);
 		this.updateSeenContextKeys();
 		this.markActiveFileSeenIfSet();
 	}
@@ -478,6 +521,20 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		this.view.refresh();
 	}
 
+	/** What opening a changed file shows. */
+	openMode(): OpenMode {
+		return this.openModeValue;
+	}
+
+	async setOpenMode(mode: OpenMode): Promise<void> {
+		if (this.openModeValue === mode) {
+			return;
+		}
+		this.openModeValue = mode;
+		await this.store.setOpenMode(mode);
+		void vscode.commands.executeCommand('setContext', 'reviewGutters.openMode', mode);
+	}
+
 	/** Focuses the Changed Files view and reveals the file being edited. */
 	async focusChangedFiles(): Promise<void> {
 		await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
@@ -492,6 +549,9 @@ export class Controller implements RenderHost, TreeHost, vscode.Disposable {
 		// The title-bar toggle wins over the setting until it is changed here.
 		if (!this.store.getViewMode()) {
 			this.viewModeValue = this.config.viewMode;
+		}
+		if (!this.store.getOpenMode()) {
+			this.openModeValue = this.config.openMode;
 		}
 		this.content.invalidate();
 		await this.refreshAllEnabled('configuration changed');

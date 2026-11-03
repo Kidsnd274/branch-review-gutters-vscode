@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import type { Controller } from './controller';
 import type { RepoInfo } from './git/repositories';
 import type { FileChange } from './changes/parse';
-import { openChange, pickAutoCandidate, pickBase, showMenu } from './ui/pickers';
+import { openChange, pickAutoCandidate, pickBase, showBaseDocument, showMenu } from './ui/pickers';
+import { offerInlineView, showBaseDiff } from './ui/inlineDiff';
 import { basenamePosix } from './util/paths';
 import { neighbourIndex } from './util/navigation';
 import * as log from './util/log';
@@ -127,6 +128,32 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 	register('reviewGutters.setTreeMode', () => controller.setViewMode('tree'));
 	register('reviewGutters.setListMode', () => controller.setViewMode('list'));
 
+	register('reviewGutters.openAsInlineDiffs', async () => {
+		await controller.setOpenMode('inlineDiff');
+		void offerInlineView();
+	});
+	register('reviewGutters.openInEditor', () => controller.setOpenMode('editor'));
+
+	// Takes the file as a uri string from the deleted-line hover, or works on the
+	// active editor from the Command Palette.
+	register('reviewGutters.openInlineDiff', async (arg: unknown) => {
+		const fileUri =
+			typeof arg === 'string' ? vscode.Uri.parse(arg) : arg instanceof vscode.Uri ? arg : vscode.window.activeTextEditor?.document.uri;
+		if (!fileUri || fileUri.scheme !== 'file') {
+			void vscode.window.showInformationMessage('Branch Review Gutters: open a file in the repository first.');
+			return;
+		}
+		const repo = controller.getRepositoryFor(fileUri);
+		const baseUri = repo ? await controller.baseUriFor(repo, fileUri) : undefined;
+		if (!repo || !baseUri) {
+			void vscode.window.showInformationMessage(
+				'Branch Review Gutters: no base version is available for this file.',
+			);
+			return;
+		}
+		await showBaseDiff(baseUri, fileUri, controller.relativePath(repo, fileUri) ?? fileUri.fsPath);
+	});
+
 	const jumpFile = async (delta: 1 | -1) => {
 		const repo = requireRepository(controller);
 		if (!repo) {
@@ -190,8 +217,7 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 		if (!target) {
 			return;
 		}
-		const doc = await vscode.workspace.openTextDocument(target.baseUri);
-		await vscode.window.showTextDocument(doc, { preview: true });
+		await showBaseDocument(target.baseUri);
 	});
 
 	register('reviewGutters.compareWithBase', async () => {
@@ -250,8 +276,7 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 		if (!baseUri) {
 			return;
 		}
-		const doc = await vscode.workspace.openTextDocument(baseUri);
-		await vscode.window.showTextDocument(doc, { preview: true });
+		await showBaseDocument(baseUri);
 	});
 
 	register('reviewGutters.compareFromTree', async (arg: unknown) => {
@@ -270,6 +295,17 @@ export function registerCommands(ctx: vscode.ExtensionContext, controller: Contr
 			fileUri,
 			`${basenamePosix(target.change.path)} (base ↔ working tree)`,
 		);
+	});
+
+	register('reviewGutters.openInlineDiffFromTree', async (arg: unknown) => {
+		const target = treeTarget(arg);
+		if (!target) {
+			return;
+		}
+		const baseUri = await needBaseUri(target.repo, target.change.path);
+		if (baseUri) {
+			await showBaseDiff(baseUri, workingUri(target.repo, target.change.path), target.change.path);
+		}
 	});
 
 	register('reviewGutters.copyTreePath', async (arg: unknown) => {

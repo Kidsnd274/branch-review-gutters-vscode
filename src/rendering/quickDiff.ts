@@ -4,6 +4,7 @@ import { isRenderableBaseline, type Baseline } from '../baseline/selection';
 import type { ChangeSet } from '../changes/parse';
 import { resolveBasePath } from '../changes/parse';
 import { BaseContentProvider, makeBaseUri } from '../content/baseContentProvider';
+import type { BasePayload } from '../content/uri';
 import { isDotGitPath } from '../util/paths';
 import * as log from '../util/log';
 
@@ -105,6 +106,17 @@ export class QuickDiffRenderer implements vscode.Disposable {
 	}
 
 	private async provideOriginalResource(repo: RepoInfo, uri: vscode.Uri): Promise<vscode.Uri | undefined> {
+		const payload = await this.basePayloadFor(repo, uri);
+		const rel = payload ? this.host.relativePath(repo, uri) : undefined;
+		return payload && rel ? makeBaseUri(rel, payload) : undefined;
+	}
+
+	/**
+	 * Which base blob a file is compared against, or undefined when it gets no
+	 * markers at all. Shared by the gutter and the deleted-line hints so the two
+	 * never disagree about which files are in play.
+	 */
+	async basePayloadFor(repo: RepoInfo, uri: vscode.Uri): Promise<BasePayload | undefined> {
 		if (uri.scheme !== 'file') {
 			return undefined;
 		}
@@ -124,11 +136,11 @@ export class QuickDiffRenderer implements vscode.Disposable {
 			return undefined;
 		}
 		const basePath = resolveBasePath(this.host.getChangeSet(repo), rel);
-		const payload = { repo: repo.rootFsPath, commit: baseline.baseCommit, base: basePath };
+		const payload: BasePayload = { repo: repo.rootFsPath, commit: baseline.baseCommit, base: basePath };
 		if (!(await this.content.shouldProvide(payload))) {
 			return undefined;
 		}
-		return makeBaseUri(rel, payload);
+		return payload;
 	}
 
 	/** The `review-base` uri for a file, for "open base version" / "compare". */

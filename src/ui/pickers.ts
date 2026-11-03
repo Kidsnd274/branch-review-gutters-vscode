@@ -5,7 +5,8 @@ import type { BaseSelection } from '../baseline/resolver';
 import { headUpstream, isAncestor, listRefs, resolveCommit, type RefEntry } from '../git/refs';
 import { isValidRef } from '../git/args';
 import { makeBaseUri } from '../content/baseContentProvider';
-import { describeCounts, totalChanges, type FileChange } from '../changes/parse';
+import { describeCounts, hasBothSides, totalChanges, type FileChange } from '../changes/parse';
+import { showBaseDiff } from './inlineDiff';
 import * as log from '../util/log';
 
 interface RefItem extends vscode.QuickPickItem {
@@ -256,21 +257,54 @@ export async function showMenu(controller: Controller, repo: RepoInfo): Promise<
 // -------------------------------------------------------------- changed files
 
 /**
+ * Opens a `review-base` document read-only in a preview tab.
+ *
+ * After an extension host restart (which is what installing a new build of this
+ * extension does) VS Code can be left holding an orphaned copy of a virtual
+ * document. Every later open of that exact uri then fails with "Could NOT open
+ * editor" and "Cannot add model because it already exists" until the window is
+ * reloaded. The same content under a uri with a fresh fragment is a different
+ * document to VS Code, so a failed open is retried once that way. The fragment
+ * is ignored by everything that reads the uri.
+ */
+export async function showBaseDocument(uri: vscode.Uri): Promise<void> {
+	try {
+		const doc = await vscode.workspace.openTextDocument(uri);
+		await vscode.window.showTextDocument(doc, { preview: true });
+	} catch (err) {
+		log.warn(`could not open ${uri.path}, retrying under a fresh uri: ${err instanceof Error ? err.message : String(err)}`);
+		const fresh = uri.with({ fragment: `r${Date.now().toString(36)}` });
+		const doc = await vscode.workspace.openTextDocument(fresh);
+		await vscode.window.showTextDocument(doc, { preview: true });
+	}
+}
+
+/**
  * Opens a change from the picker or the tree. A deleted file has nothing on
- * disk, so it opens its base version instead of a missing path.
+ * disk, so it opens its base version instead of a missing path; the deleted
+ * file view paints it red. In inline-diff mode a file with both sides opens as
+ * a diff; an added file has nothing removed to show, so it opens normally.
  */
 export async function openChange(controller: Controller, repo: RepoInfo, change: FileChange): Promise<void> {
 	if (change.kind === 'deleted') {
 		const baseCommit = controller.getBaseline(repo)?.baseCommit;
 		if (!baseCommit) {
+			void vscode.window.showInformationMessage(
+				'Branch Review Gutters: the comparison for this repository is still loading. Try again in a moment.',
+			);
 			return;
 		}
-		const uri = makeBaseUri(change.path, { repo: repo.rootFsPath, commit: baseCommit, base: change.path });
-		const doc = await vscode.workspace.openTextDocument(uri);
-		await vscode.window.showTextDocument(doc, { preview: true });
+		await showBaseDocument(makeBaseUri(change.path, { repo: repo.rootFsPath, commit: baseCommit, base: change.path }));
 		return;
 	}
 	const uri = vscode.Uri.joinPath(repo.rootUri, ...change.path.split('/'));
+	if (controller.openMode() === 'inlineDiff' && hasBothSides(change.kind)) {
+		const baseUri = await controller.baseUriFor(repo, uri);
+		if (baseUri) {
+			await showBaseDiff(baseUri, uri, change.path);
+			return;
+		}
+	}
 	const doc = await vscode.workspace.openTextDocument(uri);
 	await vscode.window.showTextDocument(doc, { preview: true });
 }

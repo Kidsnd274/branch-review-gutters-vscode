@@ -67,6 +67,23 @@ export class BaseContentProvider implements vscode.TextDocumentContentProvider, 
 		}
 	}
 
+	/**
+	 * The base version as LF text, for diffing in the extension host. Undefined
+	 * for a new file and wherever {@link shouldProvide} would say no.
+	 */
+	async baseText(payload: BasePayload): Promise<string | undefined> {
+		if (payload.base === null) {
+			return undefined;
+		}
+		try {
+			const entry = await this.load(payload);
+			return entry.binary || entry.tooLarge || entry.missing ? undefined : entry.text;
+		} catch (err) {
+			log.debug(`baseText(${payload.base}) failed: ${err instanceof Error ? err.message : String(err)}`);
+			return undefined;
+		}
+	}
+
 	async provideTextDocumentContent(uri: vscode.Uri, token: vscode.CancellationToken): Promise<string> {
 		let payload: BasePayload;
 		try {

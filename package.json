@@ -3,7 +3,7 @@
   "displayName": "Branch Review Gutters",
   "description": "Review a branch against its merge base using editor gutter markers, without diff editors.",
   "publisher": "kidsnd274",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "icon": "assets/icon/icon.png",
   "private": true,
   "license": "UNLICENSED",
@@ -127,6 +127,24 @@
         "category": "Review Gutters"
       },
       {
+        "command": "reviewGutters.openInlineDiff",
+        "title": "Open Current File as Inline Diff",
+        "category": "Review Gutters",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "reviewGutters.openAsInlineDiffs",
+        "title": "Open Changed Files as Inline Diffs",
+        "category": "Review Gutters",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "reviewGutters.openInEditor",
+        "title": "Open Changed Files in the Editor",
+        "category": "Review Gutters",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "reviewGutters.showLog",
         "title": "Show Log",
         "category": "Review Gutters"
@@ -145,6 +163,12 @@
         "command": "reviewGutters.compareFromTree",
         "title": "Compare with Base",
         "category": "Review Gutters"
+      },
+      {
+        "command": "reviewGutters.openInlineDiffFromTree",
+        "title": "Open as Inline Diff",
+        "category": "Review Gutters",
+        "icon": "$(diff)"
       },
       {
         "command": "reviewGutters.copyTreePath",
@@ -218,6 +242,24 @@
           "type": "boolean",
           "default": false,
           "description": "Mark a changed file as seen as soon as it is opened. Off by default: previewing through the Changed Files view marks everything it opens."
+        },
+        "reviewGutters.openMode": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "inlineDiff"
+          ],
+          "enumDescriptions": [
+            "Open changed files in the normal editor. Deleted and replaced lines show as labels you can hover.",
+            "Open changed files as an inline diff against the base, with deleted lines as red rows. Added files open in the normal editor."
+          ],
+          "default": "editor",
+          "description": "What clicking a file in the Changed Files view opens. Deleted files always open as their base version, painted red. The view's title-bar toggle overrides this for the current workspace."
+        },
+        "reviewGutters.deletedLineHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "In the normal editor, show a label at the end of each line where the branch deleted or replaced lines. Hover the label to read the removed lines."
         },
         "reviewGutters.maxFileSizeKB": {
           "type": "number",
@@ -320,9 +362,31 @@
         {
           "command": "reviewGutters.markFolderUnseen",
           "when": "false"
+        },
+        {
+          "command": "reviewGutters.openAsInlineDiffs",
+          "when": "reviewGutters.openMode != inlineDiff"
+        },
+        {
+          "command": "reviewGutters.openInEditor",
+          "when": "reviewGutters.openMode == inlineDiff"
+        },
+        {
+          "command": "reviewGutters.openInlineDiffFromTree",
+          "when": "false"
         }
       ],
       "view/title": [
+        {
+          "command": "reviewGutters.openAsInlineDiffs",
+          "when": "view == reviewGutters.changedFiles && reviewGutters.openMode != inlineDiff",
+          "group": "navigation@0"
+        },
+        {
+          "command": "reviewGutters.openInEditor",
+          "when": "view == reviewGutters.changedFiles && reviewGutters.openMode == inlineDiff",
+          "group": "navigation@0"
+        },
         {
           "command": "reviewGutters.setListMode",
           "when": "view == reviewGutters.changedFiles && reviewGutters.viewMode == tree",
@@ -347,6 +411,11 @@
         },
         {
           "command": "reviewGutters.compareFromTree",
+          "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)(~seen)?$/",
+          "group": "reviewGutters@2"
+        },
+        {
+          "command": "reviewGutters.openInlineDiffFromTree",
           "when": "view == reviewGutters.changedFiles && viewItem =~ /^(modified|typeChanged|renamed)(~seen)?$/",
           "group": "reviewGutters@2"
         },
@@ -395,6 +464,13 @@
           "when": "view == reviewGutters.changedFiles && viewItem =~ /^dir~(seen|partial)$/",
           "group": "inline@2"
         }
+      ],
+      "editor/title": [
+        {
+          "command": "reviewGutters.openInlineDiff",
+          "when": "resourceScheme == file && reviewGutters.activeFileDiffable && !isInDiffEditor",
+          "group": "navigation"
+        }
       ]
     }
   },
@@ -406,7 +482,7 @@
     "icon": "./scripts/build-icon.sh",
     "package": "vsce package --no-dependencies",
     "build": "./scripts/build-vsix.sh",
-    "install-local": "code --install-extension branch-review-gutters-0.1.4.vsix --force"
+    "install-local": "code --install-extension branch-review-gutters-0.2.0.vsix --force"
   },
   "devDependencies": {
     "@types/node": "^24.5.0",

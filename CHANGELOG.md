@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.0
+
+- **Deleted lines in the normal editor.** Wherever the branch deleted or
+  replaced lines, a faint red label such as `− 3 lines deleted` sits at the end
+  of the line. Hover the label to read the removed lines as a diff, with a link
+  to open the file as an inline diff. `reviewGutters.deletedLineHints` turns
+  the labels off.
+- **Inline diff mode.** A new title-bar toggle in the Changed Files view, also
+  the `reviewGutters.openMode` setting, makes clicking a modified or renamed
+  file open it as a diff against the base, with deleted lines as red rows.
+  Added files still open normally. The first diff of a session offers to switch
+  VS Code's diff editors to inline view, since that is a single user setting
+  shared by every diff editor; nothing changes unless you accept.
+- **Deleted files painted red.** A deleted file opens as its base version, red
+  from top to bottom, with a `Deleted on this branch` banner and a
+  *Mark as Seen* / *Mark as Unseen* action above line 1.
+- New command *Open Current File as Inline Diff*, also a diff button in the
+  editor title bar of any modified or renamed file and *Open as Inline Diff* on
+  a Changed Files row's right-click menu, so a diff is one click away without
+  hovering a deleted-line label.
+- **Fixed:** opening a deleted file or a base version could fail with
+  "Could NOT open editor" after the extension host restarted, which is what
+  installing a new build does. VS Code kept a stale copy of the document; the
+  open now retries under a fresh uri.
+
 ## 0.1.4
 
 - **Fixed:** auto-detection took the first configured name that existed, so a

@@ -2,6 +2,11 @@
 
 export type ChangeKind = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'typeChanged';
 
+/** Kinds with a base version and a working-tree version, so a diff has two real sides. */
+export function hasBothSides(kind: ChangeKind): boolean {
+	return kind === 'modified' || kind === 'renamed' || kind === 'typeChanged';
+}
+
 export interface FileChange {
 	kind: ChangeKind;
 	/** Repo-relative POSIX path of the file as it exists now (or at base, for deletions). */

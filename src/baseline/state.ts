@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { BaseSelection } from './resolver';
 import type { TreeMode } from '../tree/changeTree';
+import type { OpenMode } from '../config';
 
 export interface RepoState {
 	enabled: boolean;
@@ -9,6 +10,7 @@ export interface RepoState {
 
 const KEY = 'reviewGutters.repos.v1';
 const VIEW_MODE_KEY = 'reviewGutters.viewMode.v1';
+const OPEN_MODE_KEY = 'reviewGutters.openMode.v1';
 
 export const DEFAULT_REPO_STATE: RepoState = { enabled: false, selection: { kind: 'auto' } };
 
@@ -62,5 +64,15 @@ export class StateStore {
 
 	async setViewMode(mode: TreeMode): Promise<void> {
 		await this.memento.update(VIEW_MODE_KEY, mode);
+	}
+
+	/** The workspace's open mode, if the title-bar toggle has been used. */
+	getOpenMode(): OpenMode | undefined {
+		const stored = this.memento.get<string>(OPEN_MODE_KEY);
+		return stored === 'editor' || stored === 'inlineDiff' ? stored : undefined;
+	}
+
+	async setOpenMode(mode: OpenMode): Promise<void> {
+		await this.memento.update(OPEN_MODE_KEY, mode);
 	}
 }
